@@ -52,10 +52,16 @@ not from crates.io or a Go proxy release:
 # Cargo.toml
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
 # SeaORM) and `cli` (a clap subcommand to view and change the settings).
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.1.0", features = ["cli", "sea-orm"] }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.1.1", features = ["cli", "sea-orm"] }
 # A Telegram settings panel (teloxide) over a botconf store.
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.1.0" }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.1.1" }
 ```
+
+Minimum Rust: 1.95 for `botconf`, 1.96 for `botconf-telegram` (its teloxide
+pulls in takecell 0.1.2, which declares 1.96). The dependency requirements
+are floors, and botconf turns on only the features it uses, so a host keeps
+its own lock file; for example, enable serde_json's `preserve_order` in the
+host if you want JSON objects to keep their written order.
 
 ```sh
 # Go (once go/ exists)

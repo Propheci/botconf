@@ -24,7 +24,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | Order | Plan | Title | Priority | Effort | Depends on | Tag | Status |
 |---|---|---|---|---|---|---|---|
 | 1 | 001 | Move botconf and botconf-telegram here, with history; the assistant bot depends on this repo | P1 | M | — (Step 7 needs the owner to push) | `v0.1.0` | DONE (see execution notes) |
-| 2 | 002 | Declare the minimum Rust versions (1.95, 1.96 for botconf-telegram) and test them in CI | P1 | S | 001 | `v0.1.1` | TODO |
+| 2 | 002 | Declare the minimum Rust versions (1.95, 1.96 for botconf-telegram) and test them in CI | P1 | S | 001 | `v0.1.1` | DONE |
 | 3 | 003 | `Kind::Ref { domain, many }` replaces the Telegram id kinds; actors become strings | P1 | M | 001, 002 | `v0.2.0` | TODO |
 | 4 | 009 | Owned descriptors (`Shared`) and sections registered at runtime | P1 | L | 003 | `v0.3.0` | TODO |
 | 5 | 004 | Platform-neutral panel engine (`botconf-panel`) with hybrid tokens; botconf-telegram renders it | P1 | L | 003, 009 | `v0.4.0` | TODO |
@@ -149,3 +149,54 @@ each is marked in its plan):
     botconf-telegram lost three dev-dependency edges, since a git dependency
     does not lock its dev-dependencies. No version moved. taplo wrapped the
     long `botconf` dependency line. The `botconf-split` branch is deleted.
+- **002 done 2026-10-25** (tag `v0.1.1`). `botconf` declares Rust 1.95 and
+  `botconf-telegram` 1.96. On rustc 1.95 with the lock file, `botconf` passes
+  9+10+1 (default), 12+10+1 (`cli`), 10+10+1 (`sea-orm`) and 13+10+1
+  (`--all-features`). `botconf-telegram` passes its 21 tests on 1.95 with
+  `--ignore-rust-version`, which shows its 1.96 comes only from takecell.
+  `nix flake check` passes on the pinned 1.98.1. No local 1.96 toolchain
+  exists (nixpkgs has 1.95 and 1.97.1, no rustup), so the 1.96 job is first
+  proven by CI. The highest `rust-version` anything in the lock declares is
+  takecell's 1.96. Two scope additions came from the owner after wuphf plan
+  035 failed against `v0.1.0`
+  (`botconf@0.1.0 requires rustc 1.98`, plus lock churn):
+  - **Dependency floors, not pins.** The workspace dependencies were recent
+    patch pins (`serde 1.0.229`, `tokio 1.53.1` with `full`, ...), which
+    forced every host to bump its lock. They are now the oldest releases that
+    resolve and pass with `cargo update -Z direct-minimal-versions` (checked
+    in a scratch copy on rustc 1.95; every suite passed). Some floors come
+    from teloxide and sea-orm, not botconf's own code.
+
+    | Dependency | Before | After |
+    |---|---|---|
+    | anyhow | 1.0.104 | 1.0.80 |
+    | arc-swap | 1.9.2 | 1.6 |
+    | clap | 4.6.7, `derive` + `env` | 4.5, `derive` |
+    | figment | 0.10.19, `env` + `toml` | 0.10.19 (dev: `test`, `toml`, `env`) |
+    | futures | 0.3.34 | 0.3.30 |
+    | serde | 1.0.229, `derive` | 1.0.219 (dev: `derive`) |
+    | serde_json | 1.0.151, `preserve_order` | 1.0.142 |
+    | thiserror | 2.0.21 | 2.0.18 |
+    | tokio | 1.53.1, `full` | 1.39, `sync` (dev: `macros`, `rt`, `rt-multi-thread`, `test-util`) |
+    | tracing | 0.1.44 | 0.1.40 |
+
+    wuphf's locked versions (serde 1.0.228, serde_json 1.0.150, thiserror
+    2.0.18, tokio 1.52.3, clap 4.6.1, anyhow 1.0.102, tracing 0.1.44,
+    futures-util 0.3.32) all satisfy these, so depending on botconf adds
+    packages to its lock without moving any. chrono, sea-orm and teloxide are
+    unchanged.
+  - **No `preserve_order`.** Feature unification would have turned it on for
+    every host, and wuphf's migration tests compare stored JSON byte for
+    byte. Nothing in either crate relies on object key order: every suite
+    passes without it. Map entries (`Kind::Map` lists, `Choices::KeysOf`)
+    are listed in sorted order, which is also steadier than the iteration
+    order of a `HashMap` config field. The only visible difference is the key
+    order of JSON values printed by `/config list` and `get`. The assistant
+    bot still enables the feature in its own `serde_json` dependency
+    (`Cargo.toml`, line 35), so its behaviour is unchanged.
+  - **Lock file:** not unchanged as the plan expected, but no version moved.
+    It only lost two edges: `indexmap` under serde_json (`preserve_order`)
+    and `parking_lot` under tokio (`full`).
+  - **CI fix:** the planned `msrv` job ran plain `cargo test`.
+    `rust-toolchain.toml` (1.98.1) would win over the toolchain the action
+    installs, so the job runs `cargo +<toolchain> test`.

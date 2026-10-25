@@ -21,3 +21,25 @@ jobs:
       # Build, clippy (warnings denied), tests, rustfmt and taplo; see
       # `checks` in flake.nix.
       - run: nix flake check --print-build-logs --keep-going
+
+  msrv:
+    name: minimum Rust (${{ matrix.package }} on ${{ matrix.toolchain }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: botconf
+            toolchain: "1.95.0"
+            args: --all-features
+          - package: botconf-telegram
+            toolchain: "1.96.0"
+            args: ""
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      # `+toolchain`: rust-toolchain.toml pins the dev toolchain, which would
+      # otherwise win over the toolchain installed above.
+      - run: cargo +${{ matrix.toolchain }} test --locked -p ${{ matrix.package }} ${{ matrix.args }}
