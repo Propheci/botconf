@@ -455,7 +455,9 @@ mod tests {
 
     async fn press(panel: &SettingsPanel<Toy, Bot>, bot: &Bot, button: Button) -> Screen {
         let (edit, page) = edit_for(panel, button).unwrap();
-        let applied = edit::apply(&panel.store, edit, Some(1)).await.unwrap();
+        let applied = edit::apply(&panel.store, edit, Some("1".into()))
+            .await
+            .unwrap();
         panel::render(panel, Some(bot), &page, Some(&applied.notice)).await
     }
 
@@ -587,6 +589,53 @@ mod tests {
 
         let alerts = render(&panel, &bot, &Page::Setting(target(&panel, "alerts_chat"))).await;
         assert!(alerts.text.contains("Now: Family"), "{}", alerts.text);
+    }
+
+    /// Answers the panel's `ask` question about `key` with typed `text`, and
+    /// applies the result.
+    async fn answer_typed(panel: &SettingsPanel<Toy, Bot>, key: &str, ask: Ask, text: &str) {
+        let target = target(panel, key);
+        let setting = Setting::resolve(panel.store.catalog(), &target).unwrap();
+        let question = Question {
+            target: target.clone(),
+            ask,
+            panel: MessageId(1),
+        };
+        let message = crate::prompts::tests::text(text);
+        let snapshot = panel.store.current();
+        let (edit, _) = input::read(panel, &snapshot, &setting, &question, &message)
+            .await
+            .unwrap();
+        edit::apply(&panel.store, edit, Some("1".into()))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn references_of_unknown_domains_are_typed_and_listed() {
+        let (panel, bot) = panel().await;
+        // A quoted id stays a string, even when it looks like a number.
+        answer_typed(&panel, "things", Ask::Items, "\"42\" a@b 42").await;
+        assert_eq!(value(&panel, "things"), Some(json!(["42", "a@b", 42])));
+
+        let things = render(&panel, &bot, &Page::Setting(target(&panel, "things"))).await;
+        assert!(things.text.contains("a@b"), "{}", things.text);
+        assert!(things.text.contains("42"), "{}", things.text);
+
+        press(&panel, &bot, find(&things, "❌ a@b")).await;
+        assert_eq!(value(&panel, "things"), Some(json!(["42", 42])));
+
+        // ❌ removes the string, not the number that looks the same.
+        let things = render(&panel, &bot, &Page::Setting(target(&panel, "things"))).await;
+        press(&panel, &bot, find(&things, "❌ 42")).await;
+        assert_eq!(value(&panel, "things"), Some(json!([42])));
+    }
+
+    #[tokio::test]
+    async fn usernames_resolve_through_the_user_domain() {
+        let (panel, _) = panel().await;
+        answer_typed(&panel, "admins", Ask::Items, "@ann").await;
+        assert_eq!(value(&panel, "admins"), Some(json!([7])));
     }
 
     #[tokio::test]

@@ -28,7 +28,7 @@ pub struct Applied<S: Schema> {
 pub async fn apply<S: Schema>(
     store: &SettingsStore<S>,
     edit: Edit,
-    by: Option<i64>,
+    by: Option<String>,
 ) -> Result<Applied<S>, SettingsError> {
     let change = match edit {
         Edit::Set(key, value) => store.set(&key, value, by).await?,

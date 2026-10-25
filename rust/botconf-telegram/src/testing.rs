@@ -18,10 +18,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use teloxide::{
     Bot,
-    types::{ChatId, SharedUser, UserId},
+    types::{SharedUser, UserId},
 };
 
-use crate::{Name, Names, SettingsPanel};
+use crate::{Name, Names, SettingsPanel, domains};
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -40,6 +40,9 @@ pub struct Config {
     pub access: BTreeMap<String, Vec<u64>>,
     #[serde(default)]
     pub alerts_chat: Option<i64>,
+    /// References of a domain the Telegram panel does not know.
+    #[serde(default)]
+    pub things: Vec<Value>,
     #[serde(default)]
     pub features: BTreeMap<String, Value>,
 }
@@ -141,17 +144,34 @@ impl Schema for Toy {
                     inverted: true,
                 }),
             RuntimeSetting::new("greeting", "What to say").kind(Kind::Text { optional: true }),
-            RuntimeSetting::new("admins", "Who's in charge").kind(Kind::Users),
+            RuntimeSetting::new("admins", "Who's in charge").kind(Kind::Ref {
+                domain: domains::USER,
+                many: true,
+            }),
             RuntimeSetting::new("level", "How much to log").kind(Kind::OneOf {
                 choices: Choices::Fixed(LEVELS),
                 custom: true,
                 optional: false,
             }),
-            RuntimeSetting::per_entry("access", "Who may use a feature", &Kind::Users)
-                .entry_names(Choices::Fixed(FEATURES)),
+            RuntimeSetting::per_entry(
+                "access",
+                "Who may use a feature",
+                &Kind::Ref {
+                    domain: domains::USER,
+                    many: true,
+                },
+            )
+            .entry_names(Choices::Fixed(FEATURES)),
             RuntimeSetting::new("alerts_chat", "Where alerts go")
                 .titled("Alerts chat")
-                .kind(Kind::Chat),
+                .kind(Kind::Ref {
+                    domain: domains::CHAT,
+                    many: false,
+                }),
+            RuntimeSetting::new("things", "Things from elsewhere").kind(Kind::Ref {
+                domain: "toy.thing",
+                many: true,
+            }),
         ]
     }
 
@@ -173,26 +193,26 @@ pub struct FakeNames {
 }
 
 impl Names<Bot> for FakeNames {
-    fn user<'a>(&'a self, _bot: &'a Bot, id: UserId) -> BoxFuture<'a, Option<Name>> {
-        Box::pin(async move {
-            (id == UserId(7)).then(|| Name {
-                full: "Ann (@ann)".into(),
-                short: "Ann".into(),
-            })
-        })
+    fn name<'a>(
+        &'a self,
+        _bot: &'a Bot,
+        domain: &'a str,
+        id: &'a Value,
+    ) -> BoxFuture<'a, Option<Name>> {
+        let name = |full: &str, short: &str| Name {
+            full: full.into(),
+            short: short.into(),
+        };
+        let found = match (domain, id.as_i64()) {
+            (domains::USER, Some(7)) => Some(name("Ann (@ann)", "Ann")),
+            (domains::CHAT, Some(-100)) => Some(name("Family", "Family")),
+            _ => None,
+        };
+        Box::pin(async move { found })
     }
 
-    fn chat<'a>(&'a self, _bot: &'a Bot, id: ChatId) -> BoxFuture<'a, Option<Name>> {
-        Box::pin(async move {
-            (id == ChatId(-100)).then(|| Name {
-                full: "Family".into(),
-                short: "Family".into(),
-            })
-        })
-    }
-
-    fn user_by_username<'a>(&'a self, username: &'a str) -> BoxFuture<'a, Option<UserId>> {
-        Box::pin(async move { (username == "@ann").then_some(UserId(7)) })
+    fn resolve<'a>(&'a self, domain: &'a str, text: &'a str) -> BoxFuture<'a, Option<Value>> {
+        Box::pin(async move { (domain == domains::USER && text == "@ann").then(|| Value::from(7)) })
     }
 
     fn remember_users<'a>(&'a self, users: &'a [SharedUser]) -> BoxFuture<'a, ()> {

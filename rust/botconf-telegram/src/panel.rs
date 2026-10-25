@@ -3,7 +3,7 @@
 
 use serde_json::{Map, Value};
 use teloxide::{
-    types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup, UserId},
+    types::{InlineKeyboardButton, InlineKeyboardMarkup},
     utils::html::{bold, code_block, code_inline, escape, italic},
 };
 
@@ -15,7 +15,7 @@ use botconf::{
     Catalog, CatalogEntry, Choice, Field, Kind, Schema, Snapshot, Source, keys::is_below,
 };
 
-use crate::{Name, PanelBot, SettingsPanel, truncate};
+use crate::{Name, PanelBot, SettingsPanel, domains, truncate};
 
 /// Longer values are cut short on the buttons.
 const MAX_LABEL_CHARS: usize = 32;
@@ -356,11 +356,14 @@ async fn setting<S: Schema, R: PanelBot>(
             current_line(value.as_ref())
         }
 
-        Kind::Chat => {
+        Kind::Ref {
+            domain,
+            many: false,
+        } => {
             row(vec![change()]);
-            match value.as_ref().and_then(Value::as_i64) {
+            match &value {
                 Some(id) => {
-                    let name = chat_name(panel, bot, ChatId(id)).await;
+                    let name = name_of(panel, bot, domain, id).await;
                     format!("Now: {}", item_line(name.as_ref(), id))
                 }
                 None => escape("Not set."),
@@ -437,24 +440,15 @@ async fn setting<S: Schema, R: PanelBot>(
             escape("Tap to turn on or off.")
         }
 
-        Kind::Users | Kind::Chats => {
+        Kind::Ref { domain, many: true } => {
             let mut lines = Vec::new();
             for item in list(value.as_ref()) {
-                let name = match (setting.kind, item.as_i64()) {
-                    (Kind::Users, Some(id)) => user_name(panel, bot, id).await,
-                    (_, Some(id)) => chat_name(panel, bot, ChatId(id)).await,
-                    (_, None) => None,
-                };
+                let name = name_of(panel, bot, domain, &item).await;
                 let short = name
                     .as_ref()
-                    .map_or_else(|| item.to_string(), |name| name.short.clone());
-                lines.push(format!(
-                    "• {}",
-                    match item.as_i64() {
-                        Some(id) => item_line(name.as_ref(), id),
-                        None => code_inline(&item.to_string()),
-                    }
-                ));
+                    .map_or_else(|| plain(&item), |name| name.short.clone());
+                lines.push(format!("• {}", item_line(name.as_ref(), &item)));
+                // The item as JSON, so that `"42"` and `42` stay apart.
                 row(vec![button(
                     &format!("❌ {short}"),
                     Button::Remove(target.clone(), item.to_string()),
@@ -611,8 +605,10 @@ fn summary<S: Schema>(snapshot: &Snapshot<S>, setting: &Setting<'_>) -> String {
                 .count();
             format!("{on} of {} on", choices.len())
         }
-        Kind::Users => count(list(Some(&value)).len(), "user", "users"),
-        Kind::Chats => count(list(Some(&value)).len(), "chat", "chats"),
+        Kind::Ref { domain, many: true } => {
+            let (one, many) = domains::nouns(domain);
+            count(list(Some(&value)).len(), one, many)
+        }
         Kind::Map { .. } => match &value {
             Value::Object(entries) if !entries.is_empty() => {
                 entries.keys().cloned().collect::<Vec<_>>().join(", ")
@@ -639,35 +635,29 @@ fn summary<S: Schema>(snapshot: &Snapshot<S>, setting: &Setting<'_>) -> String {
         }
         Kind::Number { unit, .. } => format!("{}{unit}", plain(&value)),
         Kind::OneOf { choices, .. } => label_of(&value, &choices.resolve(snapshot)),
-        Kind::Text { .. } | Kind::Chat | Kind::Json => plain(&value),
+        Kind::Text { .. } | Kind::Ref { many: false, .. } | Kind::Json => plain(&value),
     };
     truncate(&summary, MAX_LABEL_CHARS)
 }
 
 /// `Name — <id>`, or the id alone.
-fn item_line(name: Option<&Name>, id: i64) -> String {
+fn item_line(name: Option<&Name>, id: &Value) -> String {
+    let id = code_inline(&plain(id));
     match name {
-        Some(name) => format!("{} — {}", escape(&name.full), code_inline(&id.to_string())),
-        None => code_inline(&id.to_string()),
+        Some(name) => format!("{} — {id}", escape(&name.full)),
+        None => id,
     }
 }
 
-async fn user_name<S: Schema, R: PanelBot>(
+/// The name of the reference `id` of `domain`, if the bot knows it.
+async fn name_of<S: Schema, R: PanelBot>(
     panel: &SettingsPanel<S, R>,
     bot: Option<&R>,
-    id: i64,
-) -> Option<Name> {
-    let (names, bot, id) = (panel.names.as_ref()?, bot?, u64::try_from(id).ok()?);
-    names.user(bot, UserId(id)).await
-}
-
-async fn chat_name<S: Schema, R: PanelBot>(
-    panel: &SettingsPanel<S, R>,
-    bot: Option<&R>,
-    id: ChatId,
+    domain: &str,
+    id: &Value,
 ) -> Option<Name> {
     let (names, bot) = (panel.names.as_ref()?, bot?);
-    names.chat(bot, id).await
+    names.name(bot, domain, id).await
 }
 
 /// `Now: <value>`.

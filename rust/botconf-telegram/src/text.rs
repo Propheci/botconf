@@ -226,7 +226,7 @@ mod tests {
         let outcome = command::execute(
             store,
             SettingsCommand::Set("admins".into(), "[5]".into()),
-            Some(1),
+            Some("1".into()),
         )
         .await
         .unwrap();

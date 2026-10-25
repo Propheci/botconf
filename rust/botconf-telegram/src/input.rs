@@ -17,10 +17,10 @@ use super::{
     panel::Setting,
 };
 use botconf::{Kind, Schema, Snapshot, keys::is_entry_name, parse_value};
-use teloxide::types::UserId;
 
 use crate::{
     PanelBot, SettingsPanel,
+    domains::{CHAT, USER},
     prompts::{self, CANCEL},
 };
 
@@ -69,21 +69,28 @@ pub fn question(
     };
 
     let (text, pickers_keyboard) = match (ask, setting.kind) {
-        (Ask::Items, Kind::Users) => (
+        (Ask::Items, Kind::Ref { domain: USER, .. }) => (
             format!(
                 "{} the ids or @usernames (of people who have talked to me) to add to {title}.",
                 pick("users")
             ),
-            Some(user_pickers()),
+            Some(user_pickers(10)),
         ),
-        (Ask::Items, Kind::Chats) => (
+        (Ask::Value, Kind::Ref { domain: USER, .. }) => (
+            format!(
+                "{} the id or @username (of someone who has talked to me) for {title}.{now}",
+                pick("the user")
+            ),
+            Some(user_pickers(1)),
+        ),
+        (Ask::Items, Kind::Ref { domain: CHAT, .. }) => (
             format!(
                 "{} the chat ids to add to {title}.",
                 pick("a group or a channel")
             ),
             Some(chat_pickers()),
         ),
-        (Ask::Value, Kind::Chat) => (
+        (Ask::Value, Kind::Ref { domain: CHAT, .. }) => (
             format!(
                 "{} the chat id for {title} (e.g. {}).{now}",
                 pick("the chat"),
@@ -96,6 +103,8 @@ pub fn question(
             None,
         ),
         (Ask::Value, Kind::Json) => (format!("Send the new {title}, as JSON.{now}"), None),
+        (Ask::Value, Kind::Ref { .. }) => (format!("Send the id for {title}.{now}"), None),
+        (Ask::Items, Kind::Ref { .. }) => (format!("Send the ids to add to {title}."), None),
         (Ask::Value, _) => (format!("Send the new {title}.{now}"), None),
         (Ask::Items, _) => (format!("Send the items to add to {title}."), None),
         (Ask::Entry, kind) if entry_kind(kind).empty_value().is_some() => {
@@ -124,9 +133,10 @@ pub fn question(
     }
 }
 
-fn user_pickers() -> KeyboardMarkup {
+/// Telegram's user picker, letting up to `max` users be picked.
+fn user_pickers(max: u8) -> KeyboardMarkup {
     let users = KeyboardButtonRequestUsers::new(RequestId(1))
-        .max_quantity(10)
+        .max_quantity(max)
         .request_name()
         .request_username();
     KeyboardMarkup::new([
@@ -177,7 +187,7 @@ pub async fn read<S: Schema, R: PanelBot>(
 
     let answer = match question.ask {
         Ask::Value => {
-            let value = value(setting.kind, message)?;
+            let value = value(panel, setting.kind, message).await?;
             (setting.set(snapshot, Some(value)), stay)
         }
         Ask::Items => {
@@ -235,12 +245,25 @@ async fn remember_shared<S: Schema, R: PanelBot>(panel: &SettingsPanel<S, R>, me
 }
 
 /// A whole value.
-fn value(kind: Kind, message: &Message) -> Result<Value, ReadError> {
-    if let Kind::Chat = kind {
-        if let Some(shared) = message.shared_chat() {
+async fn value<S: Schema, R: PanelBot>(
+    panel: &SettingsPanel<S, R>,
+    kind: Kind,
+    message: &Message,
+) -> Result<Value, ReadError> {
+    if let Kind::Ref { domain, .. } = kind {
+        if domain == CHAT
+            && let Some(shared) = message.shared_chat()
+        {
             return Ok(Value::from(shared.chat_id.0));
         }
-        return chat_id(message.text().unwrap_or_default().trim()).map_err(ReadError);
+        if domain == USER
+            && let Some(user) = message
+                .shared_users()
+                .and_then(|shared| shared.users.first())
+        {
+            return Ok(Value::from(user.user_id.0));
+        }
+        return reference(panel, domain, message.text().unwrap_or_default().trim()).await;
     }
 
     match message.text().map(str::trim) {
@@ -295,13 +318,41 @@ async fn items<S: Schema, R: PanelBot>(
     let mut items = Vec::new();
     for word in words {
         let item = match kind {
-            Kind::Users => user_id(panel, word).await?,
-            Kind::Chats => chat_id(word).map_err(ReadError)?,
+            Kind::Ref { domain, .. } => reference(panel, domain, word).await?,
             _ => parse_value(word),
         };
         items.push(item);
     }
     Ok(items)
+}
+
+/// A typed reference of `domain`: a number for the Telegram domains (or an
+/// `@username` for users, through [`Names::resolve`](crate::Names::resolve));
+/// for any other domain, what the names resolve it to, else the text read as
+/// JSON or as a string.
+async fn reference<S: Schema, R: PanelBot>(
+    panel: &SettingsPanel<S, R>,
+    domain: &str,
+    word: &str,
+) -> Result<Value, ReadError> {
+    if word.is_empty() {
+        return Err(ReadError("send the id as text".into()));
+    }
+    match domain {
+        USER => user_id(panel, word).await,
+        CHAT => chat_id(word).map_err(ReadError),
+        _ => Ok(resolve(panel, domain, word)
+            .await
+            .unwrap_or_else(|| parse_value(word))),
+    }
+}
+
+async fn resolve<S: Schema, R: PanelBot>(
+    panel: &SettingsPanel<S, R>,
+    domain: &str,
+    word: &str,
+) -> Option<Value> {
+    panel.names.as_ref()?.resolve(domain, word).await
 }
 
 async fn user_id<S: Schema, R: PanelBot>(
@@ -311,12 +362,8 @@ async fn user_id<S: Schema, R: PanelBot>(
     if let Ok(id) = word.parse::<u64>() {
         return Ok(Value::from(id));
     }
-    let found = match &panel.names {
-        Some(names) => names.user_by_username(word).await,
-        None => None,
-    };
-    match found {
-        Some(UserId(id)) => Ok(Value::from(id)),
+    match resolve(panel, USER, word).await {
+        Some(id) => Ok(id),
         None => Err(ReadError(format!(
             "I don't know {word}: they need to talk to me first, or pick them with the button"
         ))),

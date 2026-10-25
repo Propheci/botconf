@@ -1,10 +1,11 @@
-//! Names for user and chat ids, so that the panel shows `Ann (@ann)` rather
-//! than `123456789`. The bot provides them, e.g. from the users it has seen.
+//! Names for references, so that the panel shows `Ann (@ann)` rather than
+//! `123456789`. The bot provides them, e.g. from the users it has seen.
 
 use futures::future::BoxFuture;
-use teloxide::types::{ChatId, ChatShared, SharedUser, UserId};
+use serde_json::Value;
+use teloxide::types::{ChatShared, SharedUser};
 
-/// The name of a user or chat.
+/// The name of a user, a chat, or anything else a reference points at.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Name {
     /// E.g. `Ann Lee (@ann)`, `Family`.
@@ -13,19 +14,25 @@ pub struct Name {
     pub short: String,
 }
 
-/// Where the panel gets names from; `R` is the bot, to ask Telegram.
+/// Where the panel gets names from, per reference domain (see
+/// [`domains`](crate::domains)); `R` is the bot, to ask Telegram.
 ///
 /// Lookups can't fail: implementations log their errors and return `None`,
 /// in which case the panel shows the id.
 pub trait Names<R>: Send + Sync + 'static {
-    fn user<'a>(&'a self, bot: &'a R, id: UserId) -> BoxFuture<'a, Option<Name>>;
+    /// The name of `id` in `domain`, e.g. a Telegram user. `None` shows the
+    /// id.
+    fn name<'a>(
+        &'a self,
+        bot: &'a R,
+        domain: &'a str,
+        id: &'a Value,
+    ) -> BoxFuture<'a, Option<Name>>;
 
-    /// A group, a channel, or a user's private chat.
-    fn chat<'a>(&'a self, bot: &'a R, id: ChatId) -> BoxFuture<'a, Option<Name>>;
-
-    /// The user with this `@username`, so that users can be added by
-    /// username (which the Bot API cannot resolve).
-    fn user_by_username<'a>(&'a self, _username: &'a str) -> BoxFuture<'a, Option<UserId>> {
+    /// The id `text` refers to in `domain`, besides a plain id, e.g. an
+    /// `@username` for [`USER`](crate::domains::USER) (which the Bot API
+    /// cannot resolve).
+    fn resolve<'a>(&'a self, _domain: &'a str, _text: &'a str) -> BoxFuture<'a, Option<Value>> {
         Box::pin(async { None })
     }
 

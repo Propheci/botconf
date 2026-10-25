@@ -18,6 +18,7 @@
 //! [`prompts::Prompts::waiting`]) to the panel's handler first.
 
 mod callback;
+pub mod domains;
 mod edit;
 mod handlers;
 mod input;
@@ -170,6 +171,6 @@ fn truncate(text: &str, max: usize) -> String {
 }
 
 /// Who made a change, as stored.
-fn actor(user: teloxide::types::UserId) -> Option<i64> {
-    i64::try_from(user.0).ok()
+fn actor(user: teloxide::types::UserId) -> Option<String> {
+    Some(user.0.to_string())
 }
