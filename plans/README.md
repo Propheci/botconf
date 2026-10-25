@@ -23,7 +23,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 
 | Order | Plan | Title | Priority | Effort | Depends on | Tag | Status |
 |---|---|---|---|---|---|---|---|
-| 1 | 001 | Move botconf and botconf-telegram here, with history; the assistant bot depends on this repo | P1 | M | — (Step 7 needs the owner to push) | `v0.1.0` | BLOCKED (Steps 1–6 done, `v0.1.0` tagged locally; Step 7 waits for the owner to push the tag) |
+| 1 | 001 | Move botconf and botconf-telegram here, with history; the assistant bot depends on this repo | P1 | M | — (Step 7 needs the owner to push) | `v0.1.0` | DONE (see execution notes) |
 | 2 | 002 | Declare the minimum Rust versions (1.95, 1.96 for botconf-telegram) and test them in CI | P1 | S | 001 | `v0.1.1` | TODO |
 | 3 | 003 | `Kind::Ref { domain, many }` replaces the Telegram id kinds; actors become strings | P1 | M | 001, 002 | `v0.2.0` | TODO |
 | 4 | 009 | Owned descriptors (`Shared`) and sections registered at runtime | P1 | L | 003 | `v0.3.0` | TODO |
@@ -115,7 +115,7 @@ each is marked in its plan):
 
 ## Execution notes
 
-- **001 Steps 1–6 done 2026-10-25.** The crates are under `rust/` with their
+- **001 done 2026-10-25.** The crates are under `rust/` with their
   history, the workspace builds and `nix flake check` passes (clippy with
   warnings denied, the tests, rustfmt, taplo). Tests match the Step 0
   baseline taken in the assistant bot on its 1.98.1 toolchain: `botconf`
@@ -139,6 +139,13 @@ each is marked in its plan):
   - **Drift check:** this repository had three planning commits, not one,
     before the move (two later plan revisions). No `rust/` existed, so the
     check's intent held.
-  - **Step 7 not started.** The assistant bot is unchanged, except that the
-    temporary `botconf-split` branch from Step 1 still exists there; Step 7
-    deletes it.
+  - **Step 7** ran after the owner pushed `main` and `v0.1.0` (public). In the
+    assistant bot, branch `botconf-git-dependency` (commit `a7a83e0`, for the
+    owner to merge) depends on the git tag and drops `crates/`. Its suite
+    passes with 310 tests, the 355 from before minus the 45 that moved here,
+    and `nix flake check` passes. `cargo update -p botconf` could not match
+    the former path packages, so `cargo check` added the two git sources
+    instead. `Cargo.lock` only gained their `source` lines, and
+    botconf-telegram lost three dev-dependency edges, since a git dependency
+    does not lock its dev-dependencies. No version moved. taplo wrapped the
+    long `botconf` dependency line. The `botconf-split` branch is deleted.
