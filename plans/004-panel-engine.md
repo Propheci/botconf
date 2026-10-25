@@ -289,6 +289,18 @@ pub struct Viewer<'a> {
 pub trait Names: Send + Sync {
     fn name<'a>(&'a self, domain: &'a str, id: &'a Value) -> BoxFuture<'a, Option<Name>>;
     fn resolve<'a>(&'a self, domain: &'a str, text: &'a str) -> BoxFuture<'a, Option<Value>>;
+    /// Ids worth offering as buttons when adding to a reference setting, e.g.
+    /// the chats a host has seen recently. `query` narrows them (empty for
+    /// all); the engine shows at most `limit`. Default: none, so only the
+    /// platform picker and typed ids are offered.
+    fn candidates<'a>(
+        &'a self,
+        _domain: &'a str,
+        _query: &'a str,
+        _limit: usize,
+    ) -> BoxFuture<'a, Vec<(Value, Name)>> {
+        Box::pin(async { Vec::new() })
+    }
 }
 pub struct Name { pub full: String, pub short: String }
 
@@ -554,7 +566,12 @@ put over an expired entry (`true`), `get` after expiry (`None`),
   is gone → `Stale` with the target's page); `Open` → `screen`; `Post` →
   `post`; `Ask` →
   `ask` (built by `input::question` logic, minus the reply keyboards: the
-  picker is reported as `Picker { domain, many }`); edits → apply via
+  picker is reported as `Picker { domain, many }`; for an `Items` ask on a
+  `Kind::Ref` setting, the question screen also lists up to
+  `Limits.max_rows`-bounded `Names::candidates(domain, "", n)` as buttons,
+  each a value-bound add action — not already in the list, labelled with the
+  short name; typed text that `resolve` cannot read is retried as a
+  `candidates` query and, with one match, added); edits → apply via
   `edit::apply`, `screen` = the page to show, `notice` = `Applied.notice`,
   `change`; `Close` → `closed` with the "Settings closed; send /{command} to
   open them again." screen; a token that does not parse → `Rejected("This
@@ -681,6 +698,7 @@ working after a restart. Commit there:
 | `expired_handles_are_stale` | panel | expiry and unknown handles |
 | `redrawing_reuses_handles`, `colliding_handles_take_the_next_key`, `expired_handles_are_purged_hourly` | panel | the store stays small and correct |
 | `sea_orm_token_store_renews_refuses_collisions_and_purges` | panel (`sea-orm`) | the SQL store's semantics |
+| `ref_items_offer_candidates` | panel | adding to a `Kind::Ref` list shows `Names::candidates` (minus ids already listed) as buttons; pressing one adds that id; typed text matching one candidate adds it |
 | `screens_are_paged_when_rows_are_limited` | panel | Discord-sized screens work |
 | the 10 scenario tests from `handlers.rs` | panel | every editor behaves as before |
 | input and text tests | panel | answers and the text command as before |
