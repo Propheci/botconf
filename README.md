@@ -52,9 +52,9 @@ not from crates.io or a Go proxy release:
 # Cargo.toml
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
 # SeaORM) and `cli` (a clap subcommand to view and change the settings).
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.2.0", features = ["cli", "sea-orm"] }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.3.0", features = ["cli", "sea-orm"] }
 # A Telegram settings panel (teloxide) over a botconf store.
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.2.0" }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.3.0" }
 ```
 
 Minimum Rust: 1.95 for `botconf`, 1.96 for `botconf-telegram` (its teloxide
@@ -87,10 +87,8 @@ host's config type reads.
   there is no name.
 
 ```rust
-RuntimeSetting::new("admins", "Who's in charge").kind(Kind::Ref {
-    domain: botconf_telegram::domains::USER,
-    many: true,
-})
+RuntimeSetting::new("admins", "Who's in charge")
+    .kind(Kind::reference(botconf_telegram::domains::USER, true))
 ```
 
 Who made a change is recorded as a string (`StoredOverride.by`), since not
@@ -99,6 +97,77 @@ column is `text`. Tables made before `v0.2.0` declare it `bigint`: on SQLite
 they keep loading (botconf casts the column to text), and a migration to
 `text` is still worth doing; on Postgres they need one
 (`ALTER TABLE settings ALTER COLUMN updated_by TYPE text USING updated_by::text`).
+
+### Declaring settings
+
+Descriptors (`Kind`, `Form`, `Field`, `Choices`, `FixedChoice`,
+`RuntimeSetting`) hold `Shared` data: a `'static` reference for settings
+declared in the code, or an `Arc` for settings described at runtime (see
+below). Compiled-in settings stay `const`, through `const fn` constructors:
+
+```rust
+const LEVELS: &[FixedChoice] = &[FixedChoice::new("info", "info"), FixedChoice::new("debug", "debug")];
+const FIELDS: &[Field] = &[
+    Field::new("brightness", "Brightness", Kind::number(1, 100, "%", &[25, 50, 100], true)),
+    Field::new("white", "White", Kind::one_of(Choices::fixed(LEVELS), true, true)).group("look"),
+];
+// A nested reference to a descriptor is not promoted to `'static` (descriptors
+// have drop glue), so a form or a kind used by a map gets its own `const`.
+const PRESET_FORM: &Form = &Form::new(FIELDS, r#"{"brightness": 100}"#);
+const PRESET: &Kind = &Kind::form(PRESET_FORM);
+
+const SETTINGS: &[RuntimeSetting] = &[
+    RuntimeSetting::new("level", "How much to log")
+        .titled("Logging")
+        .kind(Kind::one_of(Choices::fixed(LEVELS), true, false)),
+    RuntimeSetting::per_entry("presets", "Named looks", PRESET),
+];
+```
+
+Settings described at runtime are built with `RuntimeSetting::owned` or by
+setting the fields (`Kind::Ref { domain: id.into(), many }`, ...); the
+builders (`titled`, `kind`, ...) are meant for `const` declarations.
+
+### Sections registered at runtime
+
+A host whose settings are partly declared by someone else while it runs (a
+bridge whose connectors each bring their own settings, say) lists the key
+prefixes where that happens in `Schema::dynamic_namespaces`, e.g.
+`connectors`, and registers each part as a `DynamicSection` when it
+arrives:
+
+```rust
+store.register_section(DynamicSection {
+    id: "connector:telegram-1".into(),
+    path: "connectors.telegram-1".into(),
+    title: "Telegram".into(),
+    description: "The Telegram connector".into(),
+    settings: vec![RuntimeSetting::owned("rendering.max_length", "Longest message", Kind::number(1, 4096, "", &[], false))],
+    validator: Arc::new(json_schema_validator), // any `Validator`
+    base: connector_values,                      // the connector's own config
+    base_source: "connector telegram-1".into(),
+}).await?;
+```
+
+- **Validation.** The section is checked by its `Validator`
+  (`fn validate(&self, &Value) -> Result<Value, String>`, closures included)
+  instead of a Rust type: for example a JSON Schema the section's owner sent.
+  botconf ships no JSON Schema implementation; plug one in.
+- **Base values.** The section's values below the overrides come with it
+  (`base`, shown as `base_source`), not from the host's config file, and its
+  keys never reach the host's configuration type.
+- **Waiting overrides.** A stored override below a dynamic namespace whose
+  section is not registered (the connector is offline at startup, or was
+  removed) waits for it instead of being ignored: `Snapshot::parked()`, and
+  listed as "Waiting for their section". When the section registers, the
+  waiting overrides apply one at a time; an invalid one is ignored with the
+  reason, as at load. `unset` clears waiting overrides too.
+- **Positions.** The catalog only grows. Registering a section again with
+  unchanged settings keeps their positions; changed or removed settings
+  leave tombstones, so a front end holding an old position finds nothing
+  rather than another setting.
+- `remove_section(id)` drops the section; its stored overrides wait for it to
+  come back.
 
 ### Versions and tags
 

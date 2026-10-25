@@ -26,7 +26,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 1 | 001 | Move botconf and botconf-telegram here, with history; the assistant bot depends on this repo | P1 | M | — (Step 7 needs the owner to push) | `v0.1.0` | DONE (see execution notes) |
 | 2 | 002 | Declare the minimum Rust versions (1.95, 1.96 for botconf-telegram) and test them in CI | P1 | S | 001 | `v0.1.1` | DONE |
 | 3 | 003 | `Kind::Ref { domain, many }` replaces the Telegram id kinds; actors become strings | P1 | M | 001, 002 | `v0.2.0` | DONE (see execution notes; assistant bot branch pending the owner) |
-| 4 | 009 | Owned descriptors (`Shared`) and sections registered at runtime | P1 | L | 003 | `v0.3.0` | TODO |
+| 4 | 009 | Owned descriptors (`Shared`) and sections registered at runtime | P1 | L | 003 | `v0.3.0` | DONE (see execution notes; assistant bot branch pending the owner) |
 | 5 | 004 | Platform-neutral panel engine (`botconf-panel`) with hybrid tokens; botconf-telegram renders it | P1 | L | 003, 009 | `v0.4.0` | TODO |
 | 6 | 005 | `botconf.v1.Settings` gRPC service (`botconf-grpc`) | P1 | L | 004, 009 | `v0.5.0` | TODO |
 | 7 | 006 | Go module and settings client | P1 | M | 005 | `v0.6.0`, `go/v0.6.0` | TODO |
@@ -235,3 +235,50 @@ each is marked in its plan):
     jobs on the pushed commits.
   - **Assistant bot (Step 5):** on branch `botconf-ref-kinds`, see its commit
     message; only targeted tests ran there, not `nix flake check`.
+- **009 done 2026-10-25** (tag `v0.3.0`). Descriptors hold `Shared` data
+  (a `'static` reference or an `Arc`), the catalog is append-only behind an
+  `ArcSwap`, and sections can be registered at runtime below the schema's
+  dynamic namespaces, with a pluggable `Validator`, their own base, and
+  stored overrides that wait for their section (`Snapshot::parked`). Tests on
+  rustc 1.95 (the shell's toolchain; `botconf-telegram` with
+  `--ignore-rust-version`): `botconf` 19 unit (15 + `Shared`,
+  `const_declarations_still_work`, `positions_never_move`, the parked
+  listing render) + 10 store + 10 dynamic + 1 doc with `--all-features`;
+  `botconf-telegram` 23, unchanged. Clippy (warnings denied) and the nightly
+  rustfmt check are clean. Removing the parking at load, letting dynamic keys
+  into the host's figment, always moving re-registered settings, or keeping
+  waiting overrides on `unset` each makes a dynamic test fail.
+  Deviations:
+  - **Builders read fields instead of destructuring.** The planned builder
+    (`let Self { .. } = self; mem::forget(old)`) does not compile on 1.95:
+    "destructor of `RuntimeSetting` cannot be evaluated at compile-time",
+    because a `const fn` may not destructure a value with drop glue either.
+    `titled`, `kind`, `entry_names` and `Field::group` instead
+    `ptr::read` each field they keep and `mem::forget(self)`; the declarations
+    stay `const`, as the plan requires. The replaced field is never dropped:
+    it holds no `Arc` in a `const`, and leaks if a builder is called at
+    runtime on owned data, so runtime code sets the fields directly
+    (`RuntimeSetting::owned`).
+  - **Nested references get their own `const`.** A nested
+    `&Kind::Form(&FORM)` or `&[Field::new(..)]` is no longer promoted to
+    `'static` (the types have drop glue), so a form, its fields, or a kind
+    used by a map value is declared in its own `const` (`const PRESET: &Kind
+    = &Kind::form(PRESET_FORM);`). Only declaration syntax changed; no test
+    expectation did.
+  - **`Setting` borrows its kind.** `botconf-telegram`'s `Setting` holds
+    `&Kind` and `Option<&Field>` borrowed from the catalog (it stays `Copy`),
+    and a press on a removed setting shows "This setting no longer exists"
+    above the home screen.
+  - **`ValueEntry::description`** is `Option<Shared<str>>`, and
+    `Listing` gained `parked`. The existing CLI render test keeps its
+    expectation (its listing has nothing parked); a new test covers the
+    "Waiting for their section" block.
+  - **Crate versions** were still `0.1.0`; they are `0.3.0` now, matching
+    the tag.
+  - **Wire consistency (Step 4):** every descriptor field is plain data or
+    `Shared`, which reads the same for both variants; the only exception is
+    `Choices::Dynamic`, a function pointer, which 005's `Describe` must
+    resolve with `Kind::choices(view)` and never send as is.
+  - **Skipped:** `nix flake check` and the 1.96 job (CI runs both on the
+    pushed commits), and taplo (not on the shell's path; the only TOML change
+    is the version line).
