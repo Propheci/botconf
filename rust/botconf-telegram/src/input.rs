@@ -388,8 +388,13 @@ mod tests {
     };
 
     fn target(panel: &SettingsPanel<Toy, Bot>, key: &str) -> Target {
-        let entries = panel.store.catalog().entries();
-        Target::setting(entries.iter().position(|entry| entry.key == key).unwrap())
+        let catalog = panel.store.catalog();
+        let position = catalog
+            .live()
+            .find(|(_, entry)| entry.key == key)
+            .unwrap()
+            .0;
+        Target::setting(position)
     }
 
     async fn answer(
@@ -398,7 +403,8 @@ mod tests {
         ask: Ask,
         message: Message,
     ) -> Result<(Edit, Page), ReadError> {
-        let setting = Setting::resolve(panel.store.catalog(), &target).unwrap();
+        let catalog = panel.store.catalog();
+        let setting = Setting::resolve(&catalog, &target).unwrap();
         let question = Question {
             target: target.clone(),
             ask,

@@ -43,7 +43,7 @@ pub struct Setting<'a> {
 
 impl<'a> Setting<'a> {
     pub fn resolve(catalog: &'a Catalog, target: &'a Target) -> Option<Self> {
-        let setting = catalog.entries().get(target.setting)?;
+        let setting = catalog.entry(target.setting)?;
         let (entry, kind): (_, &'a Kind) = match (&target.entry, &setting.kind) {
             (None, kind) => (None, kind),
             (Some(name), Kind::Map { value, .. }) => (Some(name.as_str()), &**value),
@@ -172,12 +172,21 @@ pub async fn render<S: Schema, R: PanelBot>(
     notice: Option<&str>,
 ) -> Screen {
     let snapshot = panel.store.current();
+    let catalog = panel.store.catalog();
     let mut screen = match page {
         Page::Home => home(panel, &snapshot),
         Page::Section(id) => section(panel, &snapshot, id),
-        Page::Setting(target) => match Setting::resolve(panel.store.catalog(), target) {
+        Page::Setting(target) => match Setting::resolve(&catalog, target) {
             Some(setting) => self::setting(panel, bot, &snapshot, target, setting).await,
-            None => home(panel, &snapshot),
+            None => {
+                let mut home = home(panel, &snapshot);
+                home.text = format!(
+                    "{}\n\n{}",
+                    escape("This setting no longer exists."),
+                    home.text
+                );
+                home
+            }
         },
     };
     if let Some(notice) = notice {
@@ -277,13 +286,11 @@ fn setting_rows<S: Schema, R: PanelBot>(
 ) -> Vec<Vec<InlineKeyboardButton>> {
     let catalog = panel.store.catalog();
     catalog
-        .entries()
-        .iter()
-        .enumerate()
-        .filter(|(_, entry)| entry.section == section)
+        .live()
+        .filter(|(_, entry)| entry.section.as_deref() == section)
         .filter_map(|(position, entry)| {
             let target = Target::setting(position);
-            let setting = Setting::resolve(catalog, &target)?;
+            let setting = Setting::resolve(&catalog, &target)?;
             let label = format!(
                 "{}: {}{}",
                 entry.title,
@@ -469,7 +476,7 @@ async fn setting<S: Schema, R: PanelBot>(
             let mut lines = Vec::new();
             for (position, field) in form.fields.iter().enumerate() {
                 let field_target = target.field(position);
-                let Some(field_setting) = Setting::resolve(catalog, &field_target) else {
+                let Some(field_setting) = Setting::resolve(&catalog, &field_target) else {
                     continue;
                 };
                 let summary = match field_setting.value(snapshot) {
@@ -493,7 +500,7 @@ async fn setting<S: Schema, R: PanelBot>(
             let mut lines = Vec::new();
             for name in entries.keys() {
                 let entry_target = target.entry(name);
-                let Some(entry) = Setting::resolve(catalog, &entry_target) else {
+                let Some(entry) = Setting::resolve(&catalog, &entry_target) else {
                     continue;
                 };
                 let summary = summary(snapshot, &entry);
@@ -555,7 +562,7 @@ async fn setting<S: Schema, R: PanelBot>(
         }
     }
 
-    let back = match (target.parent(), setting.setting.section) {
+    let back = match (target.parent(), &setting.setting.section) {
         (Some(parent), _) => Page::Setting(parent),
         (None, Some(section)) => Page::Section(section.to_string()),
         (None, None) => Page::Home,

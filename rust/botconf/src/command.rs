@@ -120,7 +120,8 @@ pub async fn execute<S: Schema>(
     let (key, change) = match command {
         SettingsCommand::List => return Ok(Outcome::Listing(listing(store))),
         SettingsCommand::Get(key) => {
-            let entry = store.catalog().resolve(&key)?;
+            let catalog = store.catalog();
+            let entry = catalog.resolve(&key)?;
             let description = Some(entry.description.clone());
             return Ok(Outcome::Value(ValueEntry::new(
                 &store.current(),
@@ -168,9 +169,8 @@ fn listing<S: Schema>(store: &SettingsStore<S>) -> Listing {
     let catalog = store.catalog();
 
     let settings = catalog
-        .entries()
-        .iter()
-        .map(|entry| ValueEntry::new(&snapshot, &entry.key, Some(entry.description.clone())))
+        .live()
+        .map(|(_, entry)| ValueEntry::new(&snapshot, &entry.key, Some(entry.description.clone())))
         .collect();
 
     let entries = snapshot

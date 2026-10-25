@@ -61,7 +61,9 @@ pub struct SettingsStore<S: Schema> {
     sections: Arc<[Section]>,
     base: Figment,
     storage: Box<dyn Storage>,
-    catalog: Catalog,
+    /// Swapped, under the write lock, when sections are registered or
+    /// removed; it only ever grows (see [`Catalog`]).
+    catalog: ArcSwap<Catalog>,
     current: ArcSwap<Snapshot<S>>,
     /// Serialises the read-modify-write cycles of the changes.
     write_lock: Mutex<()>,
@@ -70,7 +72,7 @@ pub struct SettingsStore<S: Schema> {
 impl<S: Schema> std::fmt::Debug for SettingsStore<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SettingsStore")
-            .field("catalog", &self.catalog)
+            .field("catalog", &self.catalog.load())
             .field("current", &self.current.load())
             .finish_non_exhaustive()
     }
@@ -99,7 +101,7 @@ impl<S: Schema> SettingsStore<S> {
             sections,
             base,
             storage,
-            catalog,
+            catalog: ArcSwap::from_pointee(catalog),
             current: ArcSwap::from_pointee(snapshot),
             write_lock: Mutex::new(()),
         })
@@ -111,9 +113,10 @@ impl<S: Schema> SettingsStore<S> {
         self.current.load_full()
     }
 
-    /// The keys that can be changed at runtime.
-    pub fn catalog(&self) -> &Catalog {
-        &self.catalog
+    /// The keys that can be changed at runtime. Cheap; like
+    /// [`Self::current`], hold on to it only for one operation.
+    pub fn catalog(&self) -> Arc<Catalog> {
+        self.catalog.load_full()
     }
 
     pub fn schema(&self) -> &S {
@@ -133,7 +136,7 @@ impl<S: Schema> SettingsStore<S> {
             &self.sections,
             &self.base,
             self.storage.as_ref(),
-            &self.catalog,
+            &self.catalog.load(),
         )
         .await?;
         Ok(self.publish(snapshot))
@@ -202,7 +205,8 @@ impl<S: Schema> SettingsStore<S> {
         entry_key: &str,
         by: Option<String>,
     ) -> Result<Change<S>, SettingsError> {
-        let setting = self.catalog.resolve(entry_key)?;
+        let catalog = self.catalog();
+        let setting = catalog.resolve(entry_key)?;
         let Some(name) = setting.entry_of(entry_key) else {
             return Err(SettingsError::NotAnEntry(entry_key.to_string()));
         };
@@ -269,7 +273,7 @@ impl<S: Schema> SettingsStore<S> {
         by: Option<String>,
         new_value: impl FnOnce(Option<Value>) -> Result<Value, SettingsError>,
     ) -> Result<Change<S>, SettingsError> {
-        self.catalog.resolve(key)?;
+        self.catalog().resolve(key)?;
 
         let _guard = self.write_lock.lock().await;
         let previous = self.current();

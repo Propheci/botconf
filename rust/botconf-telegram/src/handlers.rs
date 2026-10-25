@@ -163,7 +163,8 @@ async fn handle_button<S: Schema, R: PanelBot>(
             return Ok(());
         }
         Button::Ask(target, ask) => {
-            let Some(setting) = Setting::resolve(panel.store.catalog(), &target) else {
+            let catalog = panel.store.catalog();
+            let Some(setting) = Setting::resolve(&catalog, &target) else {
                 answer("This setting no longer exists", true).await?;
                 return Ok(());
             };
@@ -234,7 +235,7 @@ fn edit_for<S: Schema, R>(
     let snapshot = panel.store.current();
     let catalog = panel.store.catalog();
     let key_of = |target: &Target| {
-        Setting::resolve(catalog, target)
+        Setting::resolve(&catalog, target)
             .map(|setting| setting.key())
             .ok_or(GONE)
     };
@@ -242,7 +243,7 @@ fn edit_for<S: Schema, R>(
     let (target, edit) = match button {
         Button::Reload => return Ok((Edit::Reload, Page::Home)),
         Button::Toggle(target, choice) => {
-            let setting = Setting::resolve(catalog, &target).ok_or(GONE)?;
+            let setting = Setting::resolve(&catalog, &target).ok_or(GONE)?;
             let choice = setting
                 .kind
                 .choices(snapshot.as_ref())
@@ -262,7 +263,7 @@ fn edit_for<S: Schema, R>(
             (target, edit)
         }
         Button::Pick(target, choice) => {
-            let setting = Setting::resolve(catalog, &target).ok_or(GONE)?;
+            let setting = Setting::resolve(&catalog, &target).ok_or(GONE)?;
             let choice = setting
                 .kind
                 .choices(snapshot.as_ref())
@@ -283,12 +284,12 @@ fn edit_for<S: Schema, R>(
             (target, edit)
         }
         Button::Remove(target, item) => {
-            let setting = Setting::resolve(catalog, &target).ok_or(GONE)?;
+            let setting = Setting::resolve(&catalog, &target).ok_or(GONE)?;
             let edit = setting.change_list(&snapshot, Vec::new(), Some(parse_value(&item)));
             (target, edit)
         }
         Button::Clear(target) => {
-            let setting = Setting::resolve(catalog, &target).ok_or(GONE)?;
+            let setting = Setting::resolve(&catalog, &target).ok_or(GONE)?;
             let edit = setting.set(&snapshot, None);
             (target, edit)
         }
@@ -319,7 +320,8 @@ async fn handle_answer<S: Schema, R: PanelBot>(
         return Ok(());
     };
     let Answer { prompt, data } = answer;
-    let Some(setting) = Setting::resolve(panel.store.catalog(), &data.target) else {
+    let catalog = panel.store.catalog();
+    let Some(setting) = Setting::resolve(&catalog, &data.target) else {
         panel.prompts.finish(chat, user);
         prompts::clean_up(&bot, &msg, &prompt, "This setting no longer exists").await?;
         return Ok(());
@@ -421,8 +423,13 @@ mod tests {
     const PREFIX: &str = crate::DEFAULT_PREFIX;
 
     fn target(panel: &SettingsPanel<Toy, Bot>, key: &str) -> Target {
-        let entries = panel.store.catalog().entries();
-        Target::setting(entries.iter().position(|entry| entry.key == key).unwrap())
+        let catalog = panel.store.catalog();
+        let position = catalog
+            .live()
+            .find(|(_, entry)| entry.key == key)
+            .unwrap()
+            .0;
+        Target::setting(position)
     }
 
     /// The buttons of a screen, as (label, action).
@@ -595,7 +602,8 @@ mod tests {
     /// applies the result.
     async fn answer_typed(panel: &SettingsPanel<Toy, Bot>, key: &str, ask: Ask, text: &str) {
         let target = target(panel, key);
-        let setting = Setting::resolve(panel.store.catalog(), &target).unwrap();
+        let catalog = panel.store.catalog();
+        let setting = Setting::resolve(&catalog, &target).unwrap();
         let question = Question {
             target: target.clone(),
             ask,

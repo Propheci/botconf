@@ -5,6 +5,8 @@
 //! other key (tokens, database settings, ...) can only be set in the config
 //! file or the environment.
 
+use std::ops::Range;
+
 use crate::{
     kind::{Choices, Kind},
     section::Section,
@@ -150,11 +152,11 @@ pub struct CatalogEntry {
     pub per_entry: bool,
     pub kind: Kind,
     /// The id of the section that declared it, if any.
-    pub section: Option<&'static str>,
+    pub section: Option<Shared<str>>,
 }
 
 impl CatalogEntry {
-    fn new(key: String, setting: &RuntimeSetting, section: Option<&'static str>) -> Self {
+    pub(crate) fn new(key: String, setting: &RuntimeSetting, section: Option<Shared<str>>) -> Self {
         Self {
             title: setting
                 .title
@@ -194,10 +196,16 @@ pub fn is_entry_name(name: &str) -> bool {
 #[error("`{0}` cannot be changed at runtime; list the settings for the keys that can")]
 pub struct UnknownKey(pub String);
 
-/// Every runtime setting: the top-level ones, then the sections' ones.
-#[derive(Clone, Debug)]
+/// Every runtime setting: the top-level ones, the sections' ones, then those
+/// of the sections registered at runtime.
+///
+/// The catalog only grows: a setting keeps its position for as long as the
+/// program runs, and a removed one leaves a tombstone (`None`) behind, so
+/// that front ends can refer to settings by position (e.g. in buttons) and a
+/// stale reference finds nothing rather than another setting.
+#[derive(Clone, Debug, Default)]
 pub struct Catalog {
-    entries: Vec<CatalogEntry>,
+    entries: Vec<Option<CatalogEntry>>,
 }
 
 impl Catalog {
@@ -211,29 +219,64 @@ impl Catalog {
                 CatalogEntry::new(
                     format!("{}.{}", section.path, setting.key),
                     setting,
-                    Some(section.id),
+                    Some(Shared::Static(section.id)),
                 )
             })
         });
 
         Self {
-            entries: top_level.chain(sections).collect(),
+            entries: top_level.chain(sections).map(Some).collect(),
         }
     }
 
-    /// The settings, in a stable order: positions never change while the
-    /// program runs.
-    pub fn entries(&self) -> &[CatalogEntry] {
+    /// The settings by position, tombstones (`None`) included: positions
+    /// never change while the program runs.
+    pub fn entries(&self) -> &[Option<CatalogEntry>] {
         &self.entries
+    }
+
+    /// The settings that exist, with their positions.
+    pub fn live(&self) -> impl Iterator<Item = (usize, &CatalogEntry)> {
+        self.entries
+            .iter()
+            .enumerate()
+            .filter_map(|(position, entry)| Some((position, entry.as_ref()?)))
+    }
+
+    /// The setting at `position`, unless it was removed.
+    pub fn entry(&self, position: usize) -> Option<&CatalogEntry> {
+        self.entries.get(position)?.as_ref()
     }
 
     /// Returns the setting that `key` refers to: the setting itself, or one
     /// entry of a map-valued setting.
     pub fn resolve(&self, key: &str) -> Result<&CatalogEntry, UnknownKey> {
-        self.entries
-            .iter()
+        self.live()
+            .map(|(_, entry)| entry)
             .find(|entry| key == entry.key || entry.entry_of(key).is_some())
             .ok_or_else(|| UnknownKey(key.to_string()))
+    }
+
+    /// Adds `entries` at the end, and returns their positions.
+    pub(crate) fn append(
+        &mut self,
+        entries: impl IntoIterator<Item = CatalogEntry>,
+    ) -> Range<usize> {
+        let start = self.entries.len();
+        self.entries.extend(entries.into_iter().map(Some));
+        start..self.entries.len()
+    }
+
+    /// Removes the settings at `positions`, keeping every other position.
+    pub(crate) fn tombstone(&mut self, positions: Range<usize>) {
+        for entry in self
+            .entries
+            .iter_mut()
+            .take(positions.end)
+            .skip(positions.start)
+        {
+            *entry = None;
+        }
     }
 }
 
@@ -282,7 +325,7 @@ mod tests {
         assert_eq!(catalog.resolve("limits.uploads").unwrap().key, "limits");
 
         let names = catalog.resolve("features.pets.names").unwrap();
-        assert_eq!(names.section, Some("pets"));
+        assert_eq!(names.section.as_deref(), Some("pets"));
 
         for key in [
             "token",
@@ -315,6 +358,39 @@ mod tests {
         assert_eq!(
             catalog.resolve("greeting").unwrap().entry_of("greeting.x"),
             None
+        );
+    }
+
+    #[test]
+    fn positions_never_move() {
+        let setting = RuntimeSetting::new("x", "");
+        let entries = |prefix: &str, count: usize| {
+            (0..count)
+                .map(|n| CatalogEntry::new(format!("{prefix}.{n}"), &setting, None))
+                .collect::<Vec<_>>()
+        };
+        let mut catalog = Catalog::default();
+        let a = catalog.append(entries("a", 3));
+        let b = catalog.append(entries("b", 2));
+        assert_eq!((a.clone(), b.clone()), (0..3, 3..5));
+
+        catalog.tombstone(a);
+        let c = catalog.append(entries("c", 2));
+        assert_eq!(c, 5..7);
+        assert_eq!(catalog.entry(3).unwrap().key, "b.0");
+        assert_eq!(catalog.entry(4).unwrap().key, "b.1");
+        assert_eq!(catalog.entry(5).unwrap().key, "c.0");
+        for position in 0..3 {
+            assert!(catalog.entry(position).is_none(), "{position}");
+        }
+        assert!(catalog.resolve("a.0").is_err());
+        assert_eq!(catalog.resolve("c.1").unwrap().key, "c.1");
+        assert_eq!(
+            catalog
+                .live()
+                .map(|(position, _)| position)
+                .collect::<Vec<_>>(),
+            [3, 4, 5, 6]
         );
     }
 

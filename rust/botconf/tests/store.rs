@@ -297,7 +297,8 @@ async fn sections_are_typed() {
             .catalog()
             .resolve("features.pets.max")
             .unwrap()
-            .section,
+            .section
+            .as_deref(),
         Some("pets")
     );
 
