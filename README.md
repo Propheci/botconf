@@ -31,11 +31,17 @@ plans/     implementation plans (see plans/README.md)
 
 ## Status
 
-The repository is being set up. The Rust crates move here from
-[assistant_bot_rs](https://github.com/akshettrj/assistant_bot_rs), with their
-history, in [plan 001](plans/001-extract-crates.md). The remote settings
+The Rust crates live in `rust/`. They moved here from
+[assistant_bot_rs](https://github.com/akshettrj/assistant_bot_rs) with their
+history ([plan 001](plans/001-extract-crates.md)); their earlier life inside
+that bot's `src/settings/` stays in its repository. The remote settings
 service, the shared panel engine and the Go SDK follow in plans 002–009.
 [`plans/README.md`](plans/README.md) has the order and the status of each.
+
+Develop inside the Nix dev shell (`nix develop`, or `direnv allow`), which
+provides the toolchain, a nightly rustfmt (`rustfmt.toml` uses unstable
+options) and taplo. `nix flake check` runs clippy, the tests and the format
+checks, as CI does.
 
 ## Using it
 
@@ -44,7 +50,11 @@ not from crates.io or a Go proxy release:
 
 ```toml
 # Cargo.toml
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.1.0" }
+# The core. Features: `sea-orm` (keep the overrides in a SQL table with
+# SeaORM) and `cli` (a clap subcommand to view and change the settings).
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.1.0", features = ["cli", "sea-orm"] }
+# A Telegram settings panel (teloxide) over a botconf store.
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.1.0" }
 ```
 
 ```sh

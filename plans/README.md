@@ -23,7 +23,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 
 | Order | Plan | Title | Priority | Effort | Depends on | Tag | Status |
 |---|---|---|---|---|---|---|---|
-| 1 | 001 | Move botconf and botconf-telegram here, with history; the assistant bot depends on this repo | P1 | M | — (Step 7 needs the owner to push) | `v0.1.0` | TODO |
+| 1 | 001 | Move botconf and botconf-telegram here, with history; the assistant bot depends on this repo | P1 | M | — (Step 7 needs the owner to push) | `v0.1.0` | BLOCKED (Steps 1–6 done, `v0.1.0` tagged locally; Step 7 waits for the owner to push the tag) |
 | 2 | 002 | Declare the minimum Rust versions (1.95, 1.96 for botconf-telegram) and test them in CI | P1 | S | 001 | `v0.1.1` | TODO |
 | 3 | 003 | `Kind::Ref { domain, many }` replaces the Telegram id kinds; actors become strings | P1 | M | 001, 002 | `v0.2.0` | TODO |
 | 4 | 009 | Owned descriptors (`Shared`) and sections registered at runtime | P1 | L | 003 | `v0.3.0` | TODO |
@@ -112,3 +112,33 @@ each is marked in its plan):
 - 009: `const` builders through `mem::forget`, the append-only catalog,
   dynamic sections outside the host's figment, parked overrides under
   dynamic namespaces, and validators returning the normalized value.
+
+## Execution notes
+
+- **001 Steps 1–6 done 2026-10-25.** The crates are under `rust/` with their
+  history, the workspace builds and `nix flake check` passes (clippy with
+  warnings denied, the tests, rustfmt, taplo). Tests match the Step 0
+  baseline taken in the assistant bot on its 1.98.1 toolchain: `botconf`
+  13 unit + 10 integration + 1 doc (1 ignored) with `--all-features`,
+  `botconf-telegram` 21. Code under `rust/*/src` is unchanged from the split;
+  only the two manifests changed (`botconf = { workspace = true }`,
+  `repository.workspace = true`). `Cargo.lock` is the assistant bot's with
+  the unused entries dropped; no version moved. `v0.1.0` is tagged locally.
+  Deviations:
+  - **Path-limited history.** The carried commits are the subtree merge's
+    second parent, with their files at the split's root (`botconf/…`), so
+    `git log -- rust` and `git log --follow rust/botconf/src/store.rs` show
+    only the merge commit. `git log --graph` shows all four, and
+    `git log <merge>^2 -- botconf/src/store.rs` follows a file through them.
+    This is how `git subtree add` records history, not a lost commit.
+  - **`flake.lock` copied** from the assistant bot instead of created fresh,
+    so the toolchain hash, nightly rustfmt and nixpkgs match what the crates
+    were tested with. `nix flake lock` left it unchanged.
+  - **`.envrc` copied** from the assistant bot, including its nix-direnv
+    bootstrap, rather than only `use flake`.
+  - **Drift check:** this repository had three planning commits, not one,
+    before the move (two later plan revisions). No `rust/` existed, so the
+    check's intent held.
+  - **Step 7 not started.** The assistant bot is unchanged, except that the
+    temporary `botconf-split` branch from Step 1 still exists there; Step 7
+    deletes it.
