@@ -25,7 +25,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 |---|---|---|---|---|---|---|---|
 | 1 | 001 | Move botconf and botconf-telegram here, with history; the assistant bot depends on this repo | P1 | M | — (Step 7 needs the owner to push) | `v0.1.0` | DONE (see execution notes) |
 | 2 | 002 | Declare the minimum Rust versions (1.95, 1.96 for botconf-telegram) and test them in CI | P1 | S | 001 | `v0.1.1` | DONE |
-| 3 | 003 | `Kind::Ref { domain, many }` replaces the Telegram id kinds; actors become strings | P1 | M | 001, 002 | `v0.2.0` | TODO |
+| 3 | 003 | `Kind::Ref { domain, many }` replaces the Telegram id kinds; actors become strings | P1 | M | 001, 002 | `v0.2.0` | DONE (see execution notes; assistant bot branch pending the owner) |
 | 4 | 009 | Owned descriptors (`Shared`) and sections registered at runtime | P1 | L | 003 | `v0.3.0` | TODO |
 | 5 | 004 | Platform-neutral panel engine (`botconf-panel`) with hybrid tokens; botconf-telegram renders it | P1 | L | 003, 009 | `v0.4.0` | TODO |
 | 6 | 005 | `botconf.v1.Settings` gRPC service (`botconf-grpc`) | P1 | L | 004, 009 | `v0.5.0` | TODO |
@@ -200,3 +200,38 @@ each is marked in its plan):
   - **CI fix:** the planned `msrv` job ran plain `cargo test`.
     `rust-toolchain.toml` (1.98.1) would win over the toolchain the action
     installs, so the job runs `cargo +<toolchain> test`.
+- **003 done 2026-10-25** (tag `v0.2.0`). `Kind::Ref { domain, many }`
+  replaces `Chat`, `Users` and `Chats`; actors are `Option<String>`, the
+  SeaORM `updated_by` column is `text`, and `load` casts it to text. Tests,
+  in the dev shell (1.98.1): `botconf` 15 unit (13 + the `Ref` empty-value
+  test + `old_bigint_tables_still_load`) + 10 integration + 1 doc with
+  `--all-features`; `botconf-telegram` 23 (21 + the two new handler tests).
+  On rustc 1.95: `botconf --all-features` passes, and `botconf-telegram`
+  passes with `--ignore-rust-version`. Clippy (warnings denied) and
+  `cargo fmt --check` are clean. Proofs:
+  - `old_bigint_tables_still_load` fails without the cast (sqlx: "Rust type
+    `Option<String>` (as SQL type `TEXT`) is not compatible with SQL type
+    `INTEGER`"), so the cast is needed, as the plan expected. The existing
+    `stores_and_replaces_overrides` failed the same way.
+  - `usernames_resolve_through_the_user_domain` fails when `resolve` is not
+    asked; `references_of_unknown_domains_are_typed_and_listed` fails when the
+    ❌ button carries the plain text instead of the JSON value.
+
+  Deviations:
+  - **Remove buttons keep the JSON value** (`item.to_string()`), not the
+    plain text (`plain(item)`) the plan named. The handler reads the button
+    with `parse_value`, so plain text would turn the string `"42"` into the
+    number `42` and remove the wrong item. The new test covers both a quoted
+    `"42"` and the number `42`.
+  - **The toy's `things` is `Vec<Value>`**, not `Vec<String>`: the plan's own
+    test stores `["a@b", 42]`, which `Vec<String>` rejects.
+  - **A single `telegram.user` reference** (`Ref { domain: USER, many:
+    false }`) also gets Telegram's user picker (limited to one user), and a
+    picked user is read as its value. The old kinds had no single user, so
+    nothing used this before.
+  - **`nix flake check` was not run**: concurrent heavy builds crashed the
+    owner's laptop during the first attempt, so builds were limited to
+    targeted `cargo` runs. CI runs the flake checks and the minimum-version
+    jobs on the pushed commits.
+  - **Assistant bot (Step 5):** on branch `botconf-ref-kinds`, see its commit
+    message; only targeted tests ran there, not `nix flake check`.

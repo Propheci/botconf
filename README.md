@@ -52,9 +52,9 @@ not from crates.io or a Go proxy release:
 # Cargo.toml
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
 # SeaORM) and `cli` (a clap subcommand to view and change the settings).
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.1.1", features = ["cli", "sea-orm"] }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.2.0", features = ["cli", "sea-orm"] }
 # A Telegram settings panel (teloxide) over a botconf store.
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.1.1" }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.2.0" }
 ```
 
 Minimum Rust: 1.95 for `botconf`, 1.96 for `botconf-telegram` (its teloxide
@@ -67,6 +67,38 @@ host if you want JSON objects to keep their written order.
 # Go (once go/ exists)
 go get github.com/propheci/botconf/go@go/v0.1.0
 ```
+
+### Reference kinds
+
+Settings that name things outside the configuration (users, chats,
+accounts) use `Kind::Ref { domain, many }`. The **domain** says what the ids
+refer to, so that each front end knows how to pick them and how to name
+them; botconf itself never interprets the ids, and stores whatever JSON the
+host's config type reads.
+
+- `botconf-telegram` knows two domains, `botconf_telegram::domains::USER`
+  (`telegram.user`) and `CHAT` (`telegram.chat`). Their ids are numbers,
+  picked with Telegram's user and chat pickers or typed (`@username` for
+  users, through `Names::resolve`).
+- Ids of any other domain (for example a host's `wuphf.chat`) are typed: the
+  panel asks the host's `Names::resolve(domain, text)` first, then reads the
+  text as JSON or as a string (`"42"`, quoted, stays a string). The panel
+  names them through `Names::name(bot, domain, id)` and shows the id when
+  there is no name.
+
+```rust
+RuntimeSetting::new("admins", "Who's in charge").kind(Kind::Ref {
+    domain: botconf_telegram::domains::USER,
+    many: true,
+})
+```
+
+Who made a change is recorded as a string (`StoredOverride.by`), since not
+every platform's user ids are numbers. The SeaORM table's `updated_by`
+column is `text`. Tables made before `v0.2.0` declare it `bigint`: on SQLite
+they keep loading (botconf casts the column to text), and a migration to
+`text` is still worth doing; on Postgres they need one
+(`ALTER TABLE settings ALTER COLUMN updated_by TYPE text USING updated_by::text`).
 
 ### Versions and tags
 
