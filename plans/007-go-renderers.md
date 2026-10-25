@@ -11,7 +11,7 @@
 > `go/settings` has `Client` with `Render`, `Press`, `Answer`, `Command`,
 > `Questions`, `Input`, `Page`, `Actor`; `settingspb` has `Screen`, `Row`,
 > `Button`, `Text`, `Span`/`Style`, `Ask`, `Picker`, `Limits`, `ActResponse`
-> (with `screen`, `post`, `notice`, `ask`, `closed`, `rejected`, `reply`) as in
+> (with `screen`, `post`, `notice`, `ask`, `closed`, `rejected`, `reply`, `stale`) as in
 > plan 005's proto. If any differ, STOP and re-plan the mapping below.
 
 ## Status
@@ -46,14 +46,15 @@ Discord connector.
 | 4 | Discord: message components (buttons). |
 | 5 | When the helper bot is unavailable, a user session falls back to text: numbered options and text commands. |
 
-Decided while planning (flag to the owner; reviewers may push back):
+Decided while planning. Items marked "confirmed" were confirmed by the owner
+on 2026-10-25; the others are open to review:
 
-- **Package layout**: `go/render/telegram` (gotd, both session kinds) and
+- **Package layout** (confirmed by the owner 2026-10-25): `go/render/telegram` (gotd, both session kinds) and
   `go/render/discord` (discordgo). Each depends only on `go/settings`,
   `settingspb` and its platform library, so a Telegram connector does not
   pull in discordgo.
-- **The inline token is a random, single-use, short-lived handle** (16
-  random bytes, base64url, 22 characters; expires after 2 minutes) that maps
+- **The inline token is a random, single-use, short-lived handle** (confirmed by the owner 2026-10-25): 16
+  random bytes, base64url, 22 characters, expiring after 2 minutes, that maps
   to a rendered `Screen` kept in memory by the renderer. The bot answers an
   inline query only when the token is known **and** the querying user is the
   user session's own account (the bot is told that id), so nobody else can
@@ -65,7 +66,7 @@ Decided while planning (flag to the owner; reviewers may push back):
   offsets for entities), not HTML, so the same code serves both the bot
   path and the inline result (whose `InputBotInlineMessageText` takes raw
   entities).
-- **Discord prompts use modals.** An `Ask` opens a modal with one text input
+- **Discord prompts use modals** (confirmed by the owner 2026-10-25). An `Ask` opens a modal with one text input
   instead of waiting for the next message; the question is kept in
   `settings.Questions` and the modal's custom id carries only a short key.
   Pickers for domains `discord.user` and `discord.channel` use Discord's user
@@ -168,6 +169,10 @@ Mapping of an `ActResponse`:
 - `post` → `MessagesSendMessage`;
 - `notice` / `rejected` → `MessagesSetBotCallbackAnswer` text (alert for
   `rejected`);
+- `stale` (plan 004's hybrid tokens: an expired or unknown handle, or a
+  value that is gone) → `notice` as a plain toast, and `screen` edits the
+  panel like any redraw. Renderers never parse tokens, handles included: a
+  token is sent back exactly as received;
 - `ask` → send the question text with a force-reply, keep it in `Questions`
   (conversation = peer id, user = user id, panel message id); pickers:
   bot sessions can offer `KeyboardButtonRequestPeer` for
@@ -182,6 +187,7 @@ Actor: `settings.Actor{Domain: "telegram.user", ID: strconv.FormatInt(user, 10)}
 Tests (recording invoker, fake settings server from 006's tests exported as
 `go/settings/settingstest`): `TestOpenSendsTheHomeScreen`,
 `TestPressEditsThePanel`, `TestRejectedPressShowsAnAlert`,
+`TestStalePressShowsANoticeAndRedraws`,
 `TestAskThenAnswerSendsTheAnswer`, `TestForeignCallbackDataIsIgnored`,
 `TestEveryPressIsAnswered`.
 
@@ -256,7 +262,8 @@ func (p *Panel) HandleInteraction(ctx context.Context, i *discordgo.InteractionC
   Label: cut to 80}` (the engine pages to 5×5).
 - Press: `InteractionRespond(DeferredMessageUpdate)`, then `Press`, then
   `InteractionResponseEdit` with the new screen; `notice`/`rejected` as an
-  ephemeral follow-up.
+  ephemeral follow-up (a `stale` response is the same: its notice as the
+  follow-up, its screen as the edit).
 - Ask: respond with a modal (`TextInput`), custom id `prefix + "q:" + key`;
   the submit calls `Answer`. Pickers for `discord.user`/`discord.channel` via
   select menus.

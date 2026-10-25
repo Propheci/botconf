@@ -76,9 +76,10 @@ resolved (see "Wire consistency").
 | 3 | Values are pushed down to the connector (plan 005's `Watch`); the connector's TOML file stays its base and bootstrap. |
 | 4 | Only keys that apply live are runtime keys (restart-only keys stay file-only); a `restart` flag may come later. |
 
-Decided while planning (flag to the owner; reviewers may push back):
+Decided while planning. Items marked "confirmed" were confirmed by the owner
+on 2026-10-25; the others are open to review:
 
-- **`Shared<T>` for descriptor data.** A small enum
+- **`Shared<T>` for descriptor data** (confirmed by the owner 2026-10-25). A small enum
   `Shared<T: ?Sized + 'static> { Static(&'static T), Owned(Arc<T>) }`
   (`Clone`, `Deref<Target = T>`, `PartialEq` by value). `Kind`, `Form`,
   `Field`, `FixedChoice` and `RuntimeSetting` hold `Shared<str>`,

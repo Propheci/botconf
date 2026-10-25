@@ -39,9 +39,10 @@ panel renderers of plan 007 build on it.
 | 2 | The module lives in `go/`, path `github.com/propheci/botconf/go`. Tags `go/v0.x.y` on the same commit as the Rust `v0.x.y`. |
 | 3 | Git-based versions only (no proxy release beyond what `go get` does from tags). |
 
-Decided while planning (flag to the owner; reviewers may push back):
+Decided while planning. Items marked "confirmed" were confirmed by the owner
+on 2026-10-25; the others are open to review:
 
-- **Versions match wuphf's Go side**: Go 1.25, `google.golang.org/grpc
+- **Versions match wuphf's Go side** (confirmed by the owner 2026-10-25): Go 1.25, `google.golang.org/grpc
   v1.76.0`, `google.golang.org/protobuf v1.36.11`, generated with protoc
   34.1, protoc-gen-go 1.36.11 and protoc-gen-go-grpc 1.6.2 (what wuphf's
   nix shell provides), so a connector's module graph does not need two
@@ -52,7 +53,7 @@ Decided while planning (flag to the owner; reviewers may push back):
   `authorization: Bearer <token>` (what wuphf uses); `WithDialOptions(…)`
   passes anything else through. The client never decides who may do what;
   the host's authorizer does.
-- **`Watch` reconnects by itself** with capped exponential backoff and
+- **`Watch` reconnects by itself** (confirmed by the owner 2026-10-25), with capped exponential backoff and
   delivers a fresh initial event after each reconnect, so callers handle one
   kind of event ("here are the current values") and never miss state.
 - **Question keeping** for panels lives here (`settings.Questions`), not in

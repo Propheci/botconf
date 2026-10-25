@@ -27,7 +27,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 2 | 002 | Declare the minimum Rust versions (1.95, 1.96 for botconf-telegram) and test them in CI | P1 | S | 001 | `v0.1.1` | TODO |
 | 3 | 003 | `Kind::Ref { domain, many }` replaces the Telegram id kinds; actors become strings | P1 | M | 001, 002 | `v0.2.0` | TODO |
 | 4 | 009 | Owned descriptors (`Shared`) and sections registered at runtime | P1 | L | 003 | `v0.3.0` | TODO |
-| 5 | 004 | Platform-neutral panel engine (`botconf-panel`); botconf-telegram renders it | P1 | L | 003, 009 | `v0.4.0` | TODO |
+| 5 | 004 | Platform-neutral panel engine (`botconf-panel`) with hybrid tokens; botconf-telegram renders it | P1 | L | 003, 009 | `v0.4.0` | TODO |
 | 6 | 005 | `botconf.v1.Settings` gRPC service (`botconf-grpc`) | P1 | L | 004, 009 | `v0.5.0` | TODO |
 | 7 | 006 | Go module and settings client | P1 | M | 005 | `v0.6.0`, `go/v0.6.0` | TODO |
 | 8 | 007 | Go panel renderers: Telegram bots, Telegram user accounts (inline-bot trick), Discord | P2 | L | 006 | `v0.7.0`, `go/v0.7.0` | TODO |
@@ -54,7 +54,7 @@ listed.
 - **005 needs 004 and 009**: it serves the engine's screens and serializes
   owned descriptors with resolved choices. `Choices::Dynamic` (a Rust
   function pointer) never goes on the wire; `Describe` resolves it.
-- **001 Step 7, 003 Step 5, 009 Step 6** each switch the assistant bot to the
+- **001 Step 7, 003 Step 5, 009 Step 6, 004 Step 7** each switch the assistant bot to the
   new tag on a branch in that repository. They wait for the owner to push
   this repository and its tags. 004 Step 5 checks the assistant bot builds
   against a local path without committing there.
@@ -67,22 +67,48 @@ listed.
   its service on a tonic 0.12 server. Upgrading tonic is a coordinated change
   across both repositories.
 - **008** is a roadmap spike: it produces a design document, not code.
+- **Hybrid panel tokens (004)**: buttons carry the stateless encoding of
+  their action when it fits, and otherwise a short handle kept in a
+  `TokenStore` the host provides. 004 adds an in-memory store, a sea-orm one,
+  and Step 7 gives the assistant bot a migration for its table. wuphf writes
+  a sqlx store in its own plans and passes it to the `Panel` it serves
+  through 005.
 
-## Decisions made while planning (not settled by the owner)
+## Decisions confirmed by the owner on 2026-10-25
 
-Each plan lists these under "Decided while planning"; the main ones:
+These were decided while planning and then confirmed by the owner. Each plan
+keeps its reasoning under "Decided while planning".
 
 - 001: the Cargo workspace is at the repository root (`members = ["rust/*"]`);
-  history moves with `git subtree split` (filter-repo is not installed).
-- 004: tokens are the engine's deterministic, stateless encoding (no
-  server-side handle table); list items are removed by position plus a short
-  value check; text is a span model; the engine pages screens for
-  renderers with row limits (Discord).
-- 005: the server is stateless (the client keeps the pending question); one
-  `Act` RPC; `SettingsStore::subscribe` feeds `Watch`.
-- 006: Go versions match wuphf's; `Watch` reconnects on its own.
-- 007: the inline-bot token is a random single-use handle answered only for
-  the user account's own id; Discord prompts use modals.
-- 009: `Shared<T>` (static or `Arc`) keeps `const` declarations; dynamic
-  sections live outside the host's figment; overrides under a dynamic
-  namespace are parked until their section registers.
+  history moves with `git subtree split` (the four commits under `crates/`;
+  the earlier history stays in the assistant bot); the dev toolchain stays at
+  1.98.1, with separate jobs for the minimum versions (002).
+- 003: actors are strings (`Option<String>`), and the SQL column is text.
+- 004: hybrid tokens (stateless when they fit, otherwise a stored handle;
+  never a position into a list that can change); text is a span model;
+  renderers pass their `Limits` and the engine pages screens for them;
+  prompts are kept by the front ends.
+- 005: the server keeps no per-conversation state (the client keeps the
+  pending question; handles live in the host's token store); one `Act` RPC;
+  `SettingsStore::subscribe` feeds `Watch`; no default authorizer.
+- 006: Go dependency versions match wuphf's; `Watch` reconnects on its own.
+- 007: packages `go/render/telegram` and `go/render/discord`; the inline-bot
+  token is a random single-use handle answered only for the user account's
+  own id; Discord prompts use modals.
+- 009: `Shared<T>` (static or `Arc`) owned descriptors that keep `const`
+  declarations.
+
+Still open to review (decided while planning, not raised with the owner;
+each is marked in its plan):
+
+- 003: how a domain stores its ids (whatever JSON the host's type reads),
+  and the nouns domains give.
+- 005: the tonic 0.12 / prost 0.13 pin (forced by wuphf's server, see
+  above), `Describe` resolving descriptors, and `Watch`'s prefix scope.
+- 006: committed generated code, credentials as options, and question
+  keeping in `settings.Questions`.
+- 007: inline edits going to the message's data center, gotd entity text,
+  and the per-platform limits.
+- 009: `const` builders through `mem::forget`, the append-only catalog,
+  dynamic sections outside the host's figment, parked overrides under
+  dynamic namespaces, and validators returning the normalized value.

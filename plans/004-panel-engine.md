@@ -59,21 +59,16 @@ such front end, and plan 005 serves the same engine over gRPC.
 | 3 | `botconf-telegram` is rebuilt as a thin teloxide renderer over the engine. Its existing tests keep passing. |
 | 4 | Telegram's 64-byte callback data limit drives the token design. |
 | 5 | Front ends register pickers and name lookups per reference domain (from plan 003). |
+| 6 | **Hybrid tokens** (owner, 2026-10-25): a button's token is the stateless encoding of its action when that fits the front end's limit, and otherwise a short handle stored in a `TokenStore` that the host provides. Actions never point into a list that can change by position. See "Tokens" below. |
 
-Decided while planning (flag to the owner; reviewers may push back):
+Decided while planning, confirmed by the owner on 2026-10-25:
 
-- **Tokens are deterministic, not server-side handles.** The owner settled
-  "short tokens the front end never interprets". This plan keeps today's
-  stateless encoding of an action (`callback.rs`: setting index, entry name,
-  field index, argument) as the token. It needs no table, works across
-  restarts and across processes (the gRPC server in plan 005 and a reloaded
-  bot see the same tokens), and already fits 64 bytes. A server-side handle
-  table would add expiry and memory for no gain. The engine guarantees each
-  token fits the front end's limit and leaves out buttons that do not fit,
-  as today. One change: **removing a list item uses its position plus a
-  4-hex-digit check of its value** instead of the value itself, because wuphf
-  reference ids (`<connector>:<address>`) can be long. A stale check refuses
-  the press ("This list changed") and redraws.
+- **Tokens are hybrid.** See decision 6 and the "Tokens" section. The
+  planning draft used only stateless tokens, with a position plus a check for
+  removing list items. The owner chose the hybrid instead, because wuphf's
+  ids (rule ids, `<connector>:<address>` chat references) are often too long
+  for a stateless token, and a choice picked by position can pick the wrong
+  value when the list changed between drawing the panel and the press.
 - **Text is a small span model, not HTML.** `Text` is a list of spans
   (plain, bold, italic, code, code block). Each renderer turns it into its
   own markup (Telegram HTML or gotd entities, Discord markdown). Lines are
@@ -84,13 +79,78 @@ Decided while planning (flag to the owner; reviewers may push back):
   more rows, the engine pages them: the screen's content rows are cut into
   pages, and a last row holds ◀ / ▶ and the screen's own navigation (Back,
   Close). The page number travels in the `Open` token.
-- **Prompts stay with the front end.** The engine is stateless: asking for a
-  value returns an `Ask` holding a `Question` (which has a compact string
-  encoding), and the front end keeps it until the answer arrives, with its
-  own prompt mechanism. `botconf-telegram`'s `Prompts` (used by the
-  assistant bot's other modules too) stays in `botconf-telegram`. Over gRPC
-  (plan 005) the server stays stateless too: the encoded `Question` goes to
-  the client, which sends it back with the answer (the Go SDK keeps it).
+- **Prompts stay with the front end.** The engine keeps no per-conversation
+  state: asking for a value returns an `Ask` holding a `Question` (which has
+  a compact string encoding), and the front end keeps it until the answer
+  arrives, with its own prompt mechanism. `botconf-telegram`'s `Prompts`
+  (used by the assistant bot's other modules too) stays in
+  `botconf-telegram`. Over gRPC (plan 005) the server keeps no
+  per-conversation state either: the encoded `Question` goes to the client,
+  which sends it back with the answer (the Go SDK keeps it). The only state
+  is the token store, which the host owns and persists.
+
+## Tokens
+
+Every button carries a token, which the front end sends back unread. The
+rule: **an action names the exact values it acts on, never a position in a
+list that can change. Its token is the action's stateless encoding when that
+fits `limits.token_bytes`, and otherwise a stored handle.**
+
+**Stateless form.** Today's `callback.rs` encoding without the prefix (the
+front end adds its own), e.g. `o:3.lights#2`, `p:5:1`. It needs no storage,
+works across restarts and across processes, and is what almost every button
+of the assistant bot uses.
+
+**What an action may point at by position.** Only `Choices::Fixed` lists,
+which are compiled into the program and cannot change while it runs:
+`Pick(Target, usize)` and `Toggle(Target, usize)` keep today's encoding for
+them. Choices from `KeysOf` or `Dynamic` lists (modules, lights, scenes,
+wuphf rules and chats) are bound by value: new actions `PickValue(Target,
+Value)` and `ToggleValue(Target, Value)`, encoded `P:<target>:<json>` and
+`T:<target>:<json>` (the value as compact JSON; uppercase codes are unused
+today apart from `R`). Removing a list item, `Remove(Target, Value)`, binds
+the item as today (`r:<target>:<item>`, now JSON; a non-JSON argument is
+read as a string, so `r` tokens from before this plan still work). Targets
+and map entry names are already exact.
+
+**Stored form.** When the encoded action is longer than the limit, the engine
+stores it and puts a handle in the button:
+
+- The handle is `~` followed by 10 base62 characters (11 bytes, which fits
+  every front end). `~` never starts a stateless token, since action codes
+  are letters.
+- The 10 characters come from a 64-bit hash of the encoded action, using a
+  fixed algorithm implemented in the crate (FNV-1a), not `DefaultHasher`,
+  whose output may change between Rust releases. The same action gets the
+  same handle, so redrawing a screen renews the existing row instead of
+  adding one.
+- On a collision (`put` reports that the handle holds a different, unexpired
+  action), the engine derives the next handle from the action and an attempt
+  number, up to 3 attempts. After that it leaves the button out and logs a
+  warning, as it leaves out buttons that do not fit today.
+- Each stored action expires after a TTL, 30 days by default
+  (`Panel::token_ttl(Duration)`). Every render that issues the handle again
+  renews it.
+
+**Stale presses.** An unknown or expired handle returns `PanelError::Stale
+{ notice: "This panel is out of date", screen }` with the home screen,
+because the page it belonged to is unknown. A value-bound action whose value
+is gone (a toggled module or a removed list item no longer listed, or an
+index token from before this plan pointing into a list that is no longer
+`Fixed`) returns `Stale { notice: "This list changed", screen }` with the
+target's page redrawn. Front ends show the notice and redraw the message.
+
+**Purging.** Opportunistic: the `Panel` remembers when it last purged (in
+memory). A `put` more than an hour after the last purge first calls
+`purge_expired(now)`. Hosts then get clean-up without having to run a timer
+task, and the cost is at most one `DELETE` an hour; deduplicated handles keep
+the table small anyway. `Panel::purge_tokens()` is public for hosts that
+prefer their own timer.
+
+**Who owns the store.** The host. `Panel::new` uses a `MemoryTokenStore`
+(handles last until the process stops), so nothing changes for a host that
+never needs handles. A host whose ids are long passes a persistent store:
+the sea-orm one from this crate, or its own (wuphf writes a sqlx one).
 
 ## Current state
 
@@ -168,7 +228,8 @@ Record the full list of test names first:
 **In scope**: `rust/botconf-panel/**` (create), `rust/botconf-telegram/**`,
 root `Cargo.toml` (member, workspace dependency), `.github/workflows/ci.yml`
 (add `botconf-panel` to the `msrv` matrix at 1.95), README, plans index;
-the assistant bot only if its use of the public API breaks (it should not).
+in the assistant bot, only Step 7 (the persistent token store and its
+migration) — its use of the existing public API must not break.
 
 **Out of scope**: the wire format and gRPC (plan 005); Go (006, 007); new
 editors or kinds; changing what any screen says (text and buttons must stay
@@ -180,7 +241,7 @@ On `main`:
 1. `feat(botconf-panel): add the platform-neutral screen engine`
 2. `refactor(botconf-telegram): render the engine's screens`
 3. `docs: describe the panel engine and how to write a front end`
-Tag `v0.4.0` locally.
+Tag `v0.4.0` locally. Step 7 is one commit in `assistant_bot_rs`.
 
 ## The engine's API
 
@@ -242,11 +303,46 @@ pub struct Domain {
 pub enum Page { Home, Section(String), Setting(Target) }
 pub struct Target { /* as in callback.rs today */ }
 
+/// Keeps the actions of buttons whose stateless token would be too long
+/// (see "Tokens"). Same style as `botconf::Storage`.
+pub trait TokenStore: Send + Sync + 'static {
+    /// Stores `action` under `key` until `expires_at_ms`. If `key` holds the
+    /// same action, or an action that expired before `now_ms`, it is replaced
+    /// (renewing the expiry). Returns `false`, changing nothing, if `key`
+    /// holds a different unexpired action (a collision).
+    fn put<'a>(&'a self, key: &'a str, action: &'a str, now_ms: i64, expires_at_ms: i64)
+        -> BoxFuture<'a, Result<bool, StorageError>>;
+    /// The action stored under `key`, unless it is absent or expired at `now_ms`.
+    fn get<'a>(&'a self, key: &'a str, now_ms: i64)
+        -> BoxFuture<'a, Result<Option<String>, StorageError>>;
+    /// Deletes the entries expired at `now_ms`; returns how many.
+    fn purge_expired(&self, now_ms: i64) -> BoxFuture<'_, Result<u64, StorageError>>;
+}
+
+/// Handles in memory: they last until the process stops. The default.
+pub struct MemoryTokenStore { /* Mutex<HashMap<String, (String, i64)>> */ }
+
+/// Handles in a SQL table (feature `sea-orm`), created by the host's
+/// migrations with `create_tokens_table`.
+#[cfg(feature = "sea-orm")]
+pub struct SeaOrmTokenStore { /* db, table */ }
+#[cfg(feature = "sea-orm")]
+pub const DEFAULT_TOKENS_TABLE: &str = "panel_tokens";
+/// `key` (string, primary key), `action` (text), `expires_at` (big integer,
+/// milliseconds since the Unix epoch).
+#[cfg(feature = "sea-orm")]
+pub fn create_tokens_table(table: &str) -> TableCreateStatement;
+
 /// The engine over a settings store.
-pub struct Panel<S: Schema> { /* store, domains, command, section_note, on_change */ }
+pub struct Panel<S: Schema> { /* store, tokens, ttl, last_purge, domains, command, section_note */ }
 
 impl<S: Schema> Panel<S> {
+    /// Uses a `MemoryTokenStore` and a 30-day token TTL.
     pub fn new(store: Arc<SettingsStore<S>>) -> Self;
+    pub fn token_store(self, tokens: impl TokenStore) -> Self;
+    pub fn token_ttl(self, ttl: Duration) -> Self;
+    /// Deletes expired handles now (also done at most hourly on its own).
+    pub async fn purge_tokens(&self) -> Result<u64, PanelError>;
     pub fn domain(self, domain: Domain) -> Self;
     pub fn section_note(self, note: impl Fn(&Snapshot<S>, &str) -> Option<String> + …) -> Self;
     pub fn command(self, command: impl Into<String>) -> Self;   // for the texts
@@ -260,8 +356,12 @@ impl<S: Schema> Panel<S> {
         -> Result<Reaction<S>, PanelError>;
     /// The text form: `/config`, `/config set …` (text.rs today).
     pub async fn command_text(&self, args: &str, viewer: &Viewer<'_>) -> Result<CommandReply<S>, PanelError>;
-    /// A token that posts `page` as a new message, for other panels' buttons.
+    /// A stateless token that posts `page` as a new message, for other
+    /// panels' buttons; `None` if it does not fit (pages and section ids are
+    /// short, so this is what `post_button` keeps using).
     pub fn post_token(&self, page: &Page, limits: &Limits) -> Option<String>;
+    /// The same, falling back to a stored handle when it does not fit.
+    pub async fn post_token_stored(&self, page: &Page, limits: &Limits) -> Result<String, PanelError>;
 }
 
 /// What a press or an answer leads to. Several fields may be set.
@@ -304,11 +404,16 @@ pub enum Input {
 }
 
 pub enum PanelError {
-    /// The press or answer made no sense (stale button, bad value); show it
-    /// to the user and keep the panel.
+    /// The press or answer made no sense (a malformed token, a bad value);
+    /// show it to the user and keep the panel.
     Rejected(String),
-    /// The storage failed: an infrastructure error for the host.
+    /// The button was out of date (see "Tokens"): show `notice` and redraw
+    /// the panel message with `screen`.
+    Stale { notice: String, screen: Screen },
+    /// The settings storage failed: an infrastructure error for the host.
     Storage(SettingsError),
+    /// The token store failed: an infrastructure error for the host.
+    Tokens(StorageError),
 }
 ```
 
@@ -330,13 +435,32 @@ already matches) and to `[workspace.dependencies]` as
 Move, adapting only imports:
 
 - `callback.rs` → `botconf-panel/src/token.rs`: `Target`, `Page`, the button
-  actions (rename `Button` to `Action`), `encode(limit) -> Option<String>`
-  without the prefix (the front end adds its own). `Page` gains an optional
+  actions (rename `Button` to `Action`), `encode() -> String` without the
+  prefix (the front end adds its own) and `parse`. `Page` gains an optional
   page number for paged screens (`o:s:3#1@2` style; choose a separator that
   cannot occur in entry names — entry names already exclude `:` and `#`, so
-  use `@`). `Remove(Target, String)` becomes `Remove(Target, usize, u16)`
-  (position and check). Move its 4 tests, adjusted for the new `Remove` and
-  page encoding, keeping their names.
+  use `@`). Add the value-bound actions `PickValue(Target, Value)` (`P`) and
+  `ToggleValue(Target, Value)` (`T`), and make `Remove` carry a `Value`
+  (`r`, JSON, with a non-JSON argument read as a string), as described in
+  "Tokens". Move its 4 tests, adjusted for the page encoding, keeping their
+  names; `data_that_does_not_fit_is_refused` now tests the issuing step
+  below, which falls back to a handle instead of refusing.
+- `botconf-panel/src/tokens.rs` (new): `TokenStore`, `MemoryTokenStore`, the
+  FNV-1a handle derivation, and `issue(action, limits, store, ttl, now) ->
+  Result<Option<String>, StorageError>` (stateless if it fits, else a
+  handle; `None` only after 3 collisions) and `redeem(token, store, now) ->
+  Result<Option<Action>, StorageError>` (`None`: unknown or expired). The
+  opportunistic hourly purge lives here, keyed on an `AtomicI64` held by the
+  `Panel`.
+- `botconf-panel/src/tokens/sea_orm.rs` behind a `sea-orm` feature:
+  `SeaOrmTokenStore` and `create_tokens_table`, modelled on
+  `botconf::storage::SeaOrmStorage` (same `Alias`-built queries). `put` is
+  one `INSERT … ON CONFLICT(key) DO UPDATE SET action = excluded.action,
+  expires_at = excluded.expires_at WHERE <table>.action = excluded.action OR
+  <table>.expires_at <= :now`, and reports `rows_affected == 1`; SQLite and
+  Postgres both accept `ON CONFLICT … DO UPDATE … WHERE`. If sea-query
+  cannot express the `WHERE` (`OnConflict::action_and_where`), use a
+  transaction with a `SELECT` then an insert or update instead.
 - `edit.rs` → `botconf-panel/src/edit.rs`, unchanged apart from `by:
   Option<String>`.
 - `panel.rs`'s `Setting<'a>` → `botconf-panel/src/setting.rs`.
@@ -352,8 +476,13 @@ helpers from `panel.rs` into `botconf-panel/src/screens.rs`, producing
 - `bold(&escape(x))` → `Span::bold(x)`; `code_inline(x)` → `Span::code(x)`;
   `code_block(x)` → `Span::code_block(x)`; `italic(…)` → `Span::italic(…)`;
   `escape(x)` → `Span::plain(x)`. No escaping in the engine.
-- Buttons: `ButtonView { label, token }` from `Action::encode(limits.token_bytes)`;
-  leave out buttons whose token does not fit (as `button()` does today).
+- Buttons: `ButtonView { label, token }` from `tokens::issue(action, …)`:
+  the stateless encoding when it fits `limits.token_bytes`, else a stored
+  handle. A button is left out only when `issue` returns `None` (3
+  collisions) or the limit is below a handle's 11 bytes.
+- Choice buttons use `Pick`/`Toggle` with an index for `Choices::Fixed`
+  lists and `PickValue`/`ToggleValue` for `KeysOf` and `Dynamic` ones; list
+  items use `Remove(Target, Value)`.
 - Reference editors use the registered `Domain` for nouns and `viewer.names`
   for names (plan 003 behaviour).
 - Read the catalog once per call (`store.catalog()`, an `Arc<Catalog>` since
@@ -376,18 +505,54 @@ Engine tests (new, in `botconf-panel/src/tests.rs`):
 - `home_lists_settings_and_sections` — the `Toy` home screen's text spans and
   button labels equal what `botconf-telegram` showed (copy the expectations
   from `the_home_screen_lists_the_settings_and_sections`).
-- `tokens_fit_the_limit` — with `token_bytes = 20`, no token is longer than 20
-  and buttons whose action would not fit are absent.
+- `tokens_fit_the_limit` — with `token_bytes = 20`, no token is longer than
+  20 and every button of the `Toy` screens is present (long actions became
+  handles).
+- `long_entry_names_get_buttons_through_handles` — a map entry named with 60
+  characters: its button's token starts with `~`, is 11 bytes, and pressing
+  it opens that entry.
+- `short_tokens_are_unchanged` — for the `Toy` home and section screens, every
+  token whose action has no `KeysOf`/`Dynamic` choice equals today's
+  `callback.rs` encoding without the prefix (copy the strings from the
+  current tests), so the assistant bot's existing buttons keep working.
+- `dynamic_picks_bind_the_value` — render a setting whose choices are
+  `Dynamic`, reorder the list behind it (change what the dynamic function
+  returns), press the button drawn for `b`: the stored value is `b`.
+- `removing_an_item_removes_that_value` — render a list, remove another item
+  through the store, press the remove button for the original item: exactly
+  that item is gone; pressing it again → `PanelError::Stale` "This list
+  changed" with the list redrawn.
+- `expired_handles_are_stale` — a handle issued with a 1-minute TTL, pressed
+  with the clock 2 minutes later (pass `now` through the tokens API; no
+  sleeps) → `PanelError::Stale` "This panel is out of date" with the home
+  screen. An unknown `~…` token behaves the same.
+- `redrawing_reuses_handles` — rendering the same screen twice issues the
+  same handles and leaves one row per handle in the `MemoryTokenStore`.
+- `colliding_handles_take_the_next_key` — a store pre-filled with a
+  different action under the first derived key: the button gets the second
+  key and presses work.
+- `expired_handles_are_purged_hourly` — two `put`s within an hour purge
+  once; a `put` an hour later purges again (count `purge_expired` calls with
+  a wrapping test store).
 - `screens_are_paged_when_rows_are_limited` — `max_rows = 5` on a section
   with 9 settings: page 1 has 4 content rows plus a nav row with ▶; pressing
   ▶ shows the rest with ◀.
-- `removing_a_changed_item_is_refused` — remove token for position 0 after
-  the list changed under it → `PanelError::Rejected`, and the list is intact.
+
+And in `tokens/sea_orm.rs` (feature `sea-orm`, `sqlite::memory:`, like
+`botconf`'s `stores_and_replaces_overrides`):
+`sea_orm_token_store_renews_refuses_collisions_and_purges` — put, put the
+same action (renewed), put a different action under the same key (`false`),
+put over an expired entry (`true`), `get` after expiry (`None`),
+`purge_expired` count.
 
 ### Step 3: Presses, answers and the text command
 
 - `press`: `handle_button` + `edit_for` logic (`handlers.rs:121-310`) minus
-  Telegram: decode the token; `Open` → `screen`; `Post` → `post`; `Ask` →
+  Telegram: redeem the token (`tokens::redeem`: a `~` handle is looked up in
+  the store, anything else is parsed; an unknown or expired handle →
+  `PanelError::Stale` with the home screen; a value-bound action whose value
+  is gone → `Stale` with the target's page); `Open` → `screen`; `Post` →
+  `post`; `Ask` →
   `ask` (built by `input::question` logic, minus the reply keyboards: the
   picker is reported as `Picker { domain, many }`); edits → apply via
   `edit::apply`, `screen` = the page to show, `notice` = `Applied.notice`,
@@ -422,7 +587,15 @@ methods, `handler()`, `run_command`, `open`, `button`, `post_button`,
 - `SettingsPanel` wraps a `botconf_panel::Panel<S>` with the two Telegram
   domains registered (`telegram.user`, `telegram.chat`: digits parse to
   numbers; nouns user/users, chat/chats) plus its prefix, prompts, names and
-  hooks.
+  hooks. New builder methods `token_store(…)` and `token_ttl(…)` pass through
+  to the engine; without them it uses the engine's `MemoryTokenStore`, so the
+  assistant bot builds unchanged (Step 5). `botconf-telegram` re-exports
+  `TokenStore` and `MemoryTokenStore`, and gains a `sea-orm` feature that
+  enables `botconf-panel/sea-orm` and re-exports `SeaOrmTokenStore`,
+  `DEFAULT_TOKENS_TABLE` and `create_tokens_table`.
+- `PanelError::Stale { notice, screen }` → answer the callback with `notice`
+  as a toast and edit the panel message to `screen`. `PanelError::Tokens` is
+  returned as an error, like `Storage`.
 - `render.rs` (new): `Text` → Telegram HTML (`teloxide::utils::html`
   escaping each span), truncated to 4096 characters; rows → inline keyboard
   with callback data `prefix + token`; `Limits { token_bytes: 64 -
@@ -464,18 +637,51 @@ must change, STOP (the public API was meant to stay).
 ### Step 6: Docs and tag
 
 README: the crate list gains `botconf-panel`; a "Writing a front end"
-section (render `Text` and rows, send tokens back, keep `Question`s, register
-domains, pass `Limits`). Add `botconf-panel` to the `msrv` matrix at 1.95.
-Commit 3, tag `v0.4.0`.
+section (render `Text` and rows, send tokens back unread, keep `Question`s,
+register domains, pass `Limits`, handle `Stale`); a "Tokens" section (the
+hybrid rule, when a host needs a persistent `TokenStore`, the table from
+`create_tokens_table`, the TTL and the hourly purge). Add `botconf-panel` to
+the `msrv` matrix at 1.95. Commit 3, tag `v0.4.0`.
+
+### Step 7: The assistant bot keeps handles across restarts
+
+In `assistant_bot_rs`, on its own branch or main per that repo's rules,
+after bumping its botconf tag to `v0.4.0`:
+
+1. Enable `botconf-telegram`'s `sea-orm` feature.
+2. Add a migration (`migration/src/m20261025_000001_create_panel_tokens.rs`,
+   or the next free date) that runs
+   `botconf_telegram::create_tokens_table(botconf_telegram::DEFAULT_TOKENS_TABLE)`,
+   with a `down` that drops the table, and register it in
+   `migration/src/lib.rs`.
+3. In `src/modules/settings.rs::panel`, add
+   `.token_store(botconf_telegram::SeaOrmTokenStore::new(ctx.db.clone()))`
+   (use however `AppContext` exposes the connection).
+4. `cargo test --workspace` and `cargo run -- migrate` against a copy of the
+   local SQLite file.
+
+The assistant bot's ids are short, so nearly all its buttons stay stateless;
+this only keeps the occasional long one (a long preset or schedule name)
+working after a restart. Commit there:
+`feat(settings): keep panel button handles in the database`.
+
+**Verify**: its suite passes; `sqlite3 <copy> '.schema panel_tokens'` shows
+`key`, `action`, `expires_at`.
 
 ## Test plan
 
 | Test | Crate | Proves |
 |---|---|---|
-| the 4 moved `callback.rs` tests | panel | tokens round-trip, parents, refusal of long data, malformed data |
-| `tokens_fit_the_limit` | panel | limits are honoured |
+| the 4 moved `callback.rs` tests | panel | tokens round-trip, parents, long data falls back to a handle, malformed data |
+| `tokens_fit_the_limit` | panel | limits are honoured without dropping buttons |
+| `long_entry_names_get_buttons_through_handles` | panel | long ids still get buttons |
+| `short_tokens_are_unchanged` | panel | the assistant bot's existing buttons keep working |
+| `dynamic_picks_bind_the_value` | panel | a reordered list cannot misapply a press |
+| `removing_an_item_removes_that_value` | panel | removal is by value; stale presses redraw |
+| `expired_handles_are_stale` | panel | expiry and unknown handles |
+| `redrawing_reuses_handles`, `colliding_handles_take_the_next_key`, `expired_handles_are_purged_hourly` | panel | the store stays small and correct |
+| `sea_orm_token_store_renews_refuses_collisions_and_purges` | panel (`sea-orm`) | the SQL store's semantics |
 | `screens_are_paged_when_rows_are_limited` | panel | Discord-sized screens work |
-| `removing_a_changed_item_is_refused` | panel | position + check is safe |
 | the 10 scenario tests from `handlers.rs` | panel | every editor behaves as before |
 | input and text tests | panel | answers and the text command as before |
 | HTML, callback data, pickers, posting | telegram | the renderer is faithful |
@@ -487,7 +693,10 @@ Commit 3, tag `v0.4.0`.
 - [ ] Every pre-existing test name passes in one of the two crates
 - [ ] Assistant bot passes its suite against this tree without code changes
 - [ ] Clippy, fmt, minimum Rust 1.95 for `botconf-panel` pass
+- [ ] Hybrid tokens: no button points into a `KeysOf`/`Dynamic` list by
+      position; long actions get handles; the sea-orm store passes its test
 - [ ] `v0.4.0` tagged locally; README updated; `plans/README.md` row updated
+- [ ] Assistant bot keeps handles in its database (Step 7)
 
 ## STOP conditions
 
@@ -498,6 +707,8 @@ Commit 3, tag `v0.4.0`.
   longer exists.
 - The assistant bot needs a code change (Step 5).
 - `botconf-panel` ends up needing teloxide or any platform crate.
+- The sea-orm token store can express neither the conditional upsert nor the
+  transaction fallback against both SQLite and Postgres.
 
 ## Maintenance notes
 
@@ -505,6 +716,9 @@ Commit 3, tag `v0.4.0`.
   the proto mirrors `Screen`, `Text`, `Ask`, `Input` and `Limits`.
 - New kinds are added in `botconf` (the hint) and in `botconf-panel` (the
   editor). Front ends only change if the kind needs a platform picker.
-- Server-side handle tokens remain possible later behind the same `token`
-  field, if some platform's limit is ever below what the stateless encoding
-  needs.
+- Hosts that need handles must give the panel a persistent `TokenStore`, or
+  their long buttons stop working after a restart (they come back as
+  `Stale`, never as a wrong action). wuphf writes a sqlx implementation.
+- With handles available, the assistant bot's 20-character cap on light and
+  preset names (`MAX_NAME_LEN`, set by the callback limit) could be raised.
+  That is the assistant bot's call, not part of this plan.

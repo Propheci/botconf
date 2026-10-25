@@ -48,10 +48,10 @@ front end registers how to pick, parse and name ids of the domains it knows.
 | 3 | Front ends register a picker and a name lookup **per domain**; `Names` becomes a lookup keyed by domain. |
 | 4 | The assistant bot migrates once: its stored values (JSON numbers) do not change, only the kind hints and its `Names` implementation. |
 
-Decided while planning (flag to the owner in the report; reviewers may push
-back):
+Decided while planning. Items marked "confirmed" were confirmed by the owner
+on 2026-10-25; the others are open to review:
 
-- **Actors become strings too** (wuphf's settings plans require it).
+- **Actors become strings too** (confirmed by the owner 2026-10-25). wuphf's settings plans require it.
   `StoredOverride.by`, and every `by: Option<i64>` parameter on
   `SettingsStore` (`set`, `add`, `extend`, `remove`, `delete_entry`) and
   `command::execute`, become `Option<String>`, and the SeaORM `updated_by`

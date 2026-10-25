@@ -14,7 +14,7 @@
 > still holds exactly `botconf/` and `botconf-telegram/` (`ls ASSISTANT/crates`)
 > and both still use `version.workspace = true` style manifests; the subtree
 > split in Step 2 carries them over. If `crates/` holds anything else, STOP.
-> In this repository (**BOTCONF**, `~/work/side_projects/botconf`):
+> In this repository (**BOTCONF**, `~/work/side_projects/Propheci/botconf`):
 > `git log --oneline` → only the initial "docs: add README, license and
 > implementation plans" commit, and no `rust/` directory.
 
@@ -51,8 +51,9 @@ can change.
 | 5 | MIT license. |
 | 6 | The executor never adds remotes and never pushes. The owner creates `github.com/propheci/botconf` and pushes. |
 
-Decided while planning (the owner did not settle these; reviewers may push
-back):
+Decided while planning, confirmed by the owner on 2026-10-25 (together
+with keeping the 1.98.1 dev toolchain, with separate minimum-version jobs in
+002):
 
 - **The Cargo workspace is at the repository root**, with
   `members = ["rust/*"]`, not a workspace inside `rust/`. Reasons: one

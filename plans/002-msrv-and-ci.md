@@ -62,7 +62,8 @@ obstacle is takecell's declared version, not a real code need.
 
 - Root `Cargo.toml` (after 001): `[workspace.package] rust-version = "1.98"`,
   `resolver = "3"`.
-- `rust-toolchain.toml`: `channel = "1.98.1"` (the dev toolchain; keep it).
+- `rust-toolchain.toml`: `channel = "1.98.1"` (the dev toolchain; keep it,
+  confirmed by the owner 2026-10-25).
 - `.github/workflows/ci.yml`: one job, `nix flake check` (build, clippy with
   warnings denied, tests, rustfmt, taplo).
 
