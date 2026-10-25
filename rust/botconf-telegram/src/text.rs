@@ -146,7 +146,7 @@ fn render_listing(listing: &Listing, command: &str) -> String {
 }
 
 fn render_entry(entry: &ValueEntry) -> String {
-    match entry.description {
+    match &entry.description {
         Some(description) => format!("{}\n{}", value_line(entry), italic(&escape(description))),
         None => value_line(entry),
     }

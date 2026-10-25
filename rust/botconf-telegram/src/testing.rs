@@ -81,49 +81,40 @@ const LEVELS: &[FixedChoice] = &[
     FixedChoice::new("debug", "debug (verbose)"),
 ];
 
-const PRESET_FORM: Form = Form {
-    fields: &[
-        Field::new(
-            "brightness",
-            "Brightness",
-            Kind::Number {
-                min: 1,
-                max: 100,
-                unit: "%",
-                suggestions: &[10, 50, 100],
-                optional: true,
-            },
-        ),
-        Field::new(
-            "white",
-            "White",
-            Kind::OneOf {
-                choices: Choices::Fixed(&[FixedChoice::new("warm", "warm")]),
-                custom: true,
-                optional: true,
-            },
-        )
-        .group("look"),
-        Field::new(
-            "color",
-            "Colour",
-            Kind::OneOf {
-                choices: Choices::Dynamic(DynamicChoices(colors)),
-                custom: true,
-                optional: true,
-            },
-        )
-        .group("look"),
-    ],
-    initial: r#"{"brightness": 100}"#,
-};
+const WHITES: &[FixedChoice] = &[FixedChoice::new("warm", "warm")];
+
+// Nested references to descriptors are not promoted to `'static` (they have
+// drop glue), so each referenced part gets its own `const`.
+const PRESET_FIELDS: &[Field] = &[
+    Field::new(
+        "brightness",
+        "Brightness",
+        Kind::number(1, 100, "%", &[10, 50, 100], true),
+    ),
+    Field::new(
+        "white",
+        "White",
+        Kind::one_of(Choices::fixed(WHITES), true, true),
+    )
+    .group("look"),
+    Field::new(
+        "color",
+        "Colour",
+        Kind::one_of(Choices::Dynamic(DynamicChoices(colors)), true, true),
+    )
+    .group("look"),
+];
+
+const PRESET_FORM: &Form = &Form::new(PRESET_FIELDS, r#"{"brightness": 100}"#);
+const PRESET: &Kind = &Kind::form(PRESET_FORM);
+const ADMINS: &Kind = &Kind::reference(domains::USER, true);
 
 fn colors(_: &dyn View) -> Vec<Choice> {
     vec![Choice::new("red", "🔴 red"), Choice::new("blue", "🔵 blue")]
 }
 
 const LAMP_SETTINGS: &[RuntimeSetting] = &[
-    RuntimeSetting::per_entry("presets", "Named looks", &Kind::Form(&PRESET_FORM)),
+    RuntimeSetting::per_entry("presets", "Named looks", PRESET),
     RuntimeSetting::per_entry("notes", "Notes, e.g. {\"door\": \"closed\"}", &Kind::Json),
 ];
 
@@ -139,39 +130,22 @@ impl Schema for Toy {
         vec![
             RuntimeSetting::new("disabled", "Features that are off")
                 .titled("Features")
-                .kind(Kind::SetOf {
-                    choices: Choices::Fixed(FEATURES),
-                    inverted: true,
-                }),
-            RuntimeSetting::new("greeting", "What to say").kind(Kind::Text { optional: true }),
-            RuntimeSetting::new("admins", "Who's in charge").kind(Kind::Ref {
-                domain: domains::USER,
-                many: true,
-            }),
-            RuntimeSetting::new("level", "How much to log").kind(Kind::OneOf {
-                choices: Choices::Fixed(LEVELS),
-                custom: true,
-                optional: false,
-            }),
-            RuntimeSetting::per_entry(
-                "access",
-                "Who may use a feature",
-                &Kind::Ref {
-                    domain: domains::USER,
-                    many: true,
-                },
-            )
-            .entry_names(Choices::Fixed(FEATURES)),
+                .kind(Kind::set_of(Choices::fixed(FEATURES), true)),
+            RuntimeSetting::new("greeting", "What to say").kind(Kind::text(true)),
+            RuntimeSetting::new("admins", "Who's in charge")
+                .kind(Kind::reference(domains::USER, true)),
+            RuntimeSetting::new("level", "How much to log").kind(Kind::one_of(
+                Choices::fixed(LEVELS),
+                true,
+                false,
+            )),
+            RuntimeSetting::per_entry("access", "Who may use a feature", ADMINS)
+                .entry_names(Choices::fixed(FEATURES)),
             RuntimeSetting::new("alerts_chat", "Where alerts go")
                 .titled("Alerts chat")
-                .kind(Kind::Ref {
-                    domain: domains::CHAT,
-                    many: false,
-                }),
-            RuntimeSetting::new("things", "Things from elsewhere").kind(Kind::Ref {
-                domain: "toy.thing",
-                many: true,
-            }),
+                .kind(Kind::reference(domains::CHAT, false)),
+            RuntimeSetting::new("things", "Things from elsewhere")
+                .kind(Kind::reference("toy.thing", true)),
         ]
     }
 

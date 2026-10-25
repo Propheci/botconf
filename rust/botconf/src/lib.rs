@@ -66,6 +66,7 @@ pub mod keys;
 pub mod kind;
 mod provider;
 mod section;
+mod shared;
 mod snapshot;
 pub mod storage;
 mod store;
@@ -76,6 +77,7 @@ pub use self::{
     keys::{Catalog, CatalogEntry, RuntimeSetting, UnknownKey},
     kind::{Choice, Choices, DynamicChoices, Field, FixedChoice, Form, Kind},
     section::{ParsedSection, Section, SectionSettings},
+    shared::Shared,
     snapshot::{Change, Snapshot, Source, View},
     storage::{MemoryStorage, Storage, StorageError, StoredOverride},
     store::{BuildError, SettingsError, SettingsStore, parse_value},

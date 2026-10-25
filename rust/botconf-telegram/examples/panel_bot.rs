@@ -50,13 +50,12 @@ impl Schema for Example {
 
     fn settings(&self) -> Vec<RuntimeSetting> {
         vec![
-            RuntimeSetting::new("greeting", "What /start says")
-                .kind(Kind::Text { optional: false }),
-            RuntimeSetting::new("mood", "How the bot feels").kind(Kind::OneOf {
-                choices: Choices::Fixed(MOODS),
-                custom: false,
-                optional: false,
-            }),
+            RuntimeSetting::new("greeting", "What /start says").kind(Kind::text(false)),
+            RuntimeSetting::new("mood", "How the bot feels").kind(Kind::one_of(
+                Choices::fixed(MOODS),
+                false,
+                false,
+            )),
         ]
     }
 }

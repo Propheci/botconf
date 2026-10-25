@@ -8,17 +8,22 @@
 use crate::{
     kind::{Choices, Kind},
     section::Section,
+    shared::Shared,
 };
 
 /// A configuration key that can be changed at runtime.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// Compiled-in settings are `const` declarations built with [`Self::new`],
+/// [`Self::per_entry`] and the builders; settings described at runtime (e.g.
+/// by a connector) are built with [`Self::owned`] or their fields.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeSetting {
     /// The dotted path of the key: absolute for the top-level settings (e.g.
     /// `logging.filter`), relative to the section's path for a section's.
-    pub key: &'static str,
+    pub key: Shared<str>,
     /// A short name, e.g. `Sudo users` (default: derived from the key).
-    pub title: Option<&'static str>,
-    pub description: &'static str,
+    pub title: Option<Shared<str>>,
+    pub description: Shared<str>,
     /// Whether the entries of this map-valued setting can also be set one by
     /// one, as `<key>.<entry>`.
     pub per_entry: bool,
@@ -26,14 +31,31 @@ pub struct RuntimeSetting {
     pub kind: Kind,
 }
 
+// The builders below run in `const` declarations. A `const fn` cannot drop a
+// value with drop glue (`Shared` may hold an `Arc`), and on Rust 1.95 it
+// cannot destructure one either, so each builder reads the fields it keeps
+// out of `self` and forgets `self`. The replaced field is never dropped: in a
+// `const` declaration it holds no `Arc`; called at runtime on owned data it
+// leaks, so runtime code sets the fields directly instead.
 impl RuntimeSetting {
     pub const fn new(key: &'static str, description: &'static str) -> Self {
         Self {
-            key,
+            key: Shared::Static(key),
             title: None,
-            description,
+            description: Shared::Static(description),
             per_entry: false,
             kind: Kind::Json,
+        }
+    }
+
+    /// A setting described at runtime.
+    pub fn owned(key: impl Into<String>, description: impl Into<String>, kind: Kind) -> Self {
+        Self {
+            key: Shared::from(key.into()),
+            title: None,
+            description: Shared::from(description.into()),
+            per_entry: false,
+            kind,
         }
     }
 
@@ -45,37 +67,77 @@ impl RuntimeSetting {
         value: &'static Kind,
     ) -> Self {
         Self {
-            key,
+            key: Shared::Static(key),
             title: None,
-            description,
+            description: Shared::Static(description),
             per_entry: true,
-            kind: Kind::Map { names: None, value },
+            kind: Kind::map(None, value),
         }
     }
 
     #[must_use]
-    pub const fn titled(mut self, title: &'static str) -> Self {
-        self.title = Some(title);
-        self
+    pub const fn titled(self, title: &'static str) -> Self {
+        // SAFETY: each kept field is read once, then `self` is forgotten, so
+        // nothing is dropped twice.
+        let key = unsafe { std::ptr::read(&self.key) };
+        let description = unsafe { std::ptr::read(&self.description) };
+        let kind = unsafe { std::ptr::read(&self.kind) };
+        let per_entry = self.per_entry;
+        std::mem::forget(self);
+        Self {
+            key,
+            title: Some(Shared::Static(title)),
+            description,
+            per_entry,
+            kind,
+        }
     }
 
     /// See [`Kind`]; maps are declared with [`Self::per_entry`].
     #[must_use]
-    pub const fn kind(mut self, kind: Kind) -> Self {
-        self.kind = kind;
-        self
+    pub const fn kind(self, kind: Kind) -> Self {
+        // SAFETY: as in `titled`.
+        let key = unsafe { std::ptr::read(&self.key) };
+        let title = unsafe { std::ptr::read(&self.title) };
+        let description = unsafe { std::ptr::read(&self.description) };
+        let per_entry = self.per_entry;
+        std::mem::forget(self);
+        Self {
+            key,
+            title,
+            description,
+            per_entry,
+            kind,
+        }
     }
 
     /// Limits the names of the entries of a per-entry map.
     #[must_use]
-    pub const fn entry_names(mut self, choices: Choices) -> Self {
-        if let Kind::Map { value, .. } = self.kind {
-            self.kind = Kind::Map {
+    pub const fn entry_names(self, choices: Choices) -> Self {
+        // SAFETY: as in `titled`; the old kind is read whole, or only its
+        // value when it is a map, and `self` is then forgotten.
+        let key = unsafe { std::ptr::read(&self.key) };
+        let title = unsafe { std::ptr::read(&self.title) };
+        let description = unsafe { std::ptr::read(&self.description) };
+        let per_entry = self.per_entry;
+        let kind = if let Kind::Map { value, .. } = &self.kind {
+            let value = unsafe { std::ptr::read(value) };
+            Kind::Map {
                 names: Some(choices),
                 value,
-            };
+            }
+        } else {
+            std::mem::forget(choices);
+            unsafe { std::ptr::read(&self.kind) }
+        };
+        std::mem::forget(self);
+        Self {
+            key,
+            title,
+            description,
+            per_entry,
+            kind,
         }
-        self
     }
 }
 
@@ -84,7 +146,7 @@ impl RuntimeSetting {
 pub struct CatalogEntry {
     pub key: String,
     pub title: String,
-    pub description: &'static str,
+    pub description: Shared<str>,
     pub per_entry: bool,
     pub kind: Kind,
     /// The id of the section that declared it, if any.
@@ -96,11 +158,12 @@ impl CatalogEntry {
         Self {
             title: setting
                 .title
-                .map_or_else(|| title_of(setting.key), str::to_string),
+                .as_deref()
+                .map_or_else(|| title_of(&setting.key), str::to_string),
             key,
-            description: setting.description,
+            description: setting.description.clone(),
             per_entry: setting.per_entry,
-            kind: setting.kind,
+            kind: setting.kind.clone(),
             section,
         }
     }

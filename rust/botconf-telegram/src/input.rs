@@ -69,28 +69,28 @@ pub fn question(
     };
 
     let (text, pickers_keyboard) = match (ask, setting.kind) {
-        (Ask::Items, Kind::Ref { domain: USER, .. }) => (
+        (Ask::Items, Kind::Ref { domain, .. }) if &**domain == USER => (
             format!(
                 "{} the ids or @usernames (of people who have talked to me) to add to {title}.",
                 pick("users")
             ),
             Some(user_pickers(10)),
         ),
-        (Ask::Value, Kind::Ref { domain: USER, .. }) => (
+        (Ask::Value, Kind::Ref { domain, .. }) if &**domain == USER => (
             format!(
                 "{} the id or @username (of someone who has talked to me) for {title}.{now}",
                 pick("the user")
             ),
             Some(user_pickers(1)),
         ),
-        (Ask::Items, Kind::Ref { domain: CHAT, .. }) => (
+        (Ask::Items, Kind::Ref { domain, .. }) if &**domain == CHAT => (
             format!(
                 "{} the chat ids to add to {title}.",
                 pick("a group or a channel")
             ),
             Some(chat_pickers()),
         ),
-        (Ask::Value, Kind::Ref { domain: CHAT, .. }) => (
+        (Ask::Value, Kind::Ref { domain, .. }) if &**domain == CHAT => (
             format!(
                 "{} the chat id for {title} (e.g. {}).{now}",
                 pick("the chat"),
@@ -113,7 +113,7 @@ pub fn question(
         (Ask::Entry, _) => (
             format!(
                 "Send the name of the new {title} entry, then its value.\n{}",
-                italic(&escape(setting.setting.description))
+                italic(&escape(&setting.setting.description))
             ),
             None,
         ),
@@ -223,9 +223,9 @@ pub async fn read<S: Schema, R: PanelBot>(
 }
 
 /// The kind of the entries of a map.
-fn entry_kind(kind: Kind) -> Kind {
+fn entry_kind(kind: &Kind) -> &Kind {
     match kind {
-        Kind::Map { value, .. } => *value,
+        Kind::Map { value, .. } => value,
         kind => kind,
     }
 }
@@ -247,16 +247,16 @@ async fn remember_shared<S: Schema, R: PanelBot>(panel: &SettingsPanel<S, R>, me
 /// A whole value.
 async fn value<S: Schema, R: PanelBot>(
     panel: &SettingsPanel<S, R>,
-    kind: Kind,
+    kind: &Kind,
     message: &Message,
 ) -> Result<Value, ReadError> {
     if let Kind::Ref { domain, .. } = kind {
-        if domain == CHAT
+        if &**domain == CHAT
             && let Some(shared) = message.shared_chat()
         {
             return Ok(Value::from(shared.chat_id.0));
         }
-        if domain == USER
+        if &**domain == USER
             && let Some(user) = message
                 .shared_users()
                 .and_then(|shared| shared.users.first())
@@ -273,13 +273,13 @@ async fn value<S: Schema, R: PanelBot>(
 }
 
 /// Text as a value of `kind`: taken as typed for text, JSON otherwise.
-fn typed(kind: Kind, text: &str) -> Result<Value, ReadError> {
+fn typed(kind: &Kind, text: &str) -> Result<Value, ReadError> {
     match kind {
         Kind::Text { .. } | Kind::OneOf { .. } => Ok(Value::String(text.to_string())),
         Kind::Number { min, max, .. } => {
             let number = text.trim_end_matches('%').trim();
             match number.parse::<i64>() {
-                Ok(number) if (min..=max).contains(&number) => Ok(Value::from(number)),
+                Ok(number) if (*min..=*max).contains(&number) => Ok(Value::from(number)),
                 _ => Err(ReadError(format!(
                     "`{text}` is not a number from {min} to {max}"
                 ))),
@@ -292,7 +292,7 @@ fn typed(kind: Kind, text: &str) -> Result<Value, ReadError> {
 /// Items to add to a list.
 async fn items<S: Schema, R: PanelBot>(
     panel: &SettingsPanel<S, R>,
-    kind: Kind,
+    kind: &Kind,
     message: &Message,
 ) -> Result<Vec<Value>, ReadError> {
     if let Some(shared) = message.shared_users() {

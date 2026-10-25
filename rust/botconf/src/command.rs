@@ -2,7 +2,7 @@
 //! command, a CLI, ...). They return structured [`Outcome`]s that each front
 //! end renders its own way.
 
-use crate::{Change, Schema, SettingsError, SettingsStore, Snapshot, Source, parse_value};
+use crate::{Change, Schema, SettingsError, SettingsStore, Shared, Snapshot, Source, parse_value};
 use serde_json::Value;
 
 /// An operation on the runtime settings. Values are raw user input, parsed
@@ -26,15 +26,11 @@ pub struct ValueEntry {
     /// `None` when the key has no value at all (e.g. an absent map entry).
     pub value: Option<Value>,
     pub source: Source,
-    pub description: Option<&'static str>,
+    pub description: Option<Shared<str>>,
 }
 
 impl ValueEntry {
-    fn new<S: Schema>(
-        snapshot: &Snapshot<S>,
-        key: &str,
-        description: Option<&'static str>,
-    ) -> Self {
+    fn new<S: Schema>(snapshot: &Snapshot<S>, key: &str, description: Option<Shared<str>>) -> Self {
         Self {
             key: key.to_string(),
             value: snapshot.value(key),
@@ -125,7 +121,7 @@ pub async fn execute<S: Schema>(
         SettingsCommand::List => return Ok(Outcome::Listing(listing(store))),
         SettingsCommand::Get(key) => {
             let entry = store.catalog().resolve(&key)?;
-            let description = Some(entry.description);
+            let description = Some(entry.description.clone());
             return Ok(Outcome::Value(ValueEntry::new(
                 &store.current(),
                 &key,
@@ -174,7 +170,7 @@ fn listing<S: Schema>(store: &SettingsStore<S>) -> Listing {
     let settings = catalog
         .entries()
         .iter()
-        .map(|entry| ValueEntry::new(&snapshot, &entry.key, Some(entry.description)))
+        .map(|entry| ValueEntry::new(&snapshot, &entry.key, Some(entry.description.clone())))
         .collect();
 
     let entries = snapshot

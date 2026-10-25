@@ -35,25 +35,25 @@ pub struct Setting<'a> {
     /// The entry name, for an entry of a map.
     pub entry: Option<&'a str>,
     /// The field, for a field of a form.
-    pub field: Option<&'static Field>,
+    pub field: Option<&'a Field>,
     /// The kind of the value: the map's values' kind for an entry, the
     /// field's for a field.
-    pub kind: Kind,
+    pub kind: &'a Kind,
 }
 
 impl<'a> Setting<'a> {
     pub fn resolve(catalog: &'a Catalog, target: &'a Target) -> Option<Self> {
         let setting = catalog.entries().get(target.setting)?;
-        let (entry, kind) = match (&target.entry, setting.kind) {
+        let (entry, kind): (_, &'a Kind) = match (&target.entry, &setting.kind) {
             (None, kind) => (None, kind),
-            (Some(name), Kind::Map { value, .. }) => (Some(name.as_str()), *value),
+            (Some(name), Kind::Map { value, .. }) => (Some(name.as_str()), &**value),
             (Some(_), _) => return None,
         };
         let (field, kind) = match (target.field, kind) {
             (None, kind) => (None, kind),
             (Some(field), Kind::Form(form)) => {
                 let field = form.fields.get(field)?;
-                (Some(field), field.kind)
+                (Some(field), &field.kind)
             }
             (Some(_), _) => return None,
         };
@@ -88,7 +88,7 @@ impl<'a> Setting<'a> {
     pub fn value<S: Schema>(&self, snapshot: &Snapshot<S>) -> Option<Value> {
         let value = snapshot.value(&self.key())?;
         let value = match self.field {
-            Some(field) => value.get(field.key)?.clone(),
+            Some(field) => value.get(&*field.key)?.clone(),
             None => value,
         };
         (!value.is_null()).then_some(value)
@@ -108,19 +108,19 @@ impl<'a> Setting<'a> {
         };
         match value {
             Some(value) => {
-                if let (Some(group), Kind::Form(kind)) = (field.group, self.form_kind()) {
+                if let (Some(group), Kind::Form(kind)) = (&field.group, self.form_kind()) {
                     for other in kind
                         .fields
                         .iter()
-                        .filter(|other| other.group == Some(group))
+                        .filter(|other| other.group.as_ref() == Some(group))
                     {
-                        form.remove(other.key);
+                        form.remove(&*other.key);
                     }
                 }
                 form.insert(field.key.to_string(), value);
             }
             None => {
-                form.remove(field.key);
+                form.remove(&*field.key);
             }
         }
         Edit::Set(key, Value::Object(form))
@@ -155,9 +155,9 @@ impl<'a> Setting<'a> {
     }
 
     /// The kind of the form holding the field.
-    fn form_kind(&self) -> Kind {
-        match (self.entry, self.setting.kind) {
-            (Some(_), Kind::Map { value, .. }) => *value,
+    fn form_kind(&self) -> &'a Kind {
+        match (self.entry, &self.setting.kind) {
+            (Some(_), Kind::Map { value, .. }) => &**value,
             (_, kind) => kind,
         }
     }
@@ -311,7 +311,7 @@ async fn setting<S: Schema, R: PanelBot>(
     let mut text = format!(
         "{}\n{}",
         bold(&escape(&setting.title())),
-        italic(&escape(setting.setting.description)),
+        italic(&escape(&setting.setting.description)),
     );
     if setting.field.is_none() {
         let source = match snapshot.source(&key) {
@@ -352,7 +352,7 @@ async fn setting<S: Schema, R: PanelBot>(
         }
 
         Kind::Text { optional } => {
-            row(vec![change(), clear("🗑 Clear", optional)]);
+            row(vec![change(), clear("🗑 Clear", *optional)]);
             current_line(value.as_ref())
         }
 
@@ -372,8 +372,8 @@ async fn setting<S: Schema, R: PanelBot>(
 
         Kind::Number { optional, .. } | Kind::OneOf { optional, .. } => {
             let (custom, unit) = match setting.kind {
-                Kind::OneOf { custom, .. } => (custom, ""),
-                Kind::Number { unit, .. } => (true, unit),
+                Kind::OneOf { custom, .. } => (*custom, ""),
+                Kind::Number { unit, .. } => (true, &**unit),
                 _ => (false, ""),
             };
             let picked =
@@ -398,7 +398,7 @@ async fn setting<S: Schema, R: PanelBot>(
                 row(chunk.iter().cloned().map(Some).collect());
             }
             row(vec![
-                clear("🚫 None", optional),
+                clear("🚫 None", *optional),
                 custom
                     .then(|| button("✏️ Other…", Button::Ask(target.clone(), Ask::Value)))
                     .flatten(),
@@ -429,7 +429,7 @@ async fn setting<S: Schema, R: PanelBot>(
                 .iter()
                 .enumerate()
                 .filter_map(|(position, choice)| {
-                    let on = listed.contains(&Value::String(choice.value.clone())) != inverted;
+                    let on = listed.contains(&Value::String(choice.value.clone())) != *inverted;
                     let label = format!("{} {}", if on { "✅" } else { "⬜" }, choice.label);
                     button(&label, Button::Toggle(target.clone(), position))
                 })
@@ -476,7 +476,7 @@ async fn setting<S: Schema, R: PanelBot>(
                     Some(_) => summary(snapshot, &field_setting),
                     None => "—".to_string(),
                 };
-                lines.push(format!("• {}: {}", bold(field.title), escape(&summary)));
+                lines.push(format!("• {}: {}", bold(&field.title), escape(&summary)));
                 row(vec![button(
                     &format!("{}: {summary} ›", field.title),
                     Button::Open(Page::Setting(field_target)),
@@ -574,12 +574,12 @@ fn excluded_fields(setting: &Setting<'_>) -> Option<String> {
     let (field, Kind::Form(form)) = (setting.field?, setting.form_kind()) else {
         return None;
     };
-    let group = field.group?;
+    let group = field.group.as_ref()?;
     let others: Vec<_> = form
         .fields
         .iter()
-        .filter(|other| other.group == Some(group) && other.key != field.key)
-        .map(|other| other.title)
+        .filter(|other| other.group.as_ref() == Some(group) && other.key != field.key)
+        .map(|other| &*other.title)
         .collect();
     (!others.is_empty()).then(|| others.join(" or "))
 }
@@ -601,7 +601,7 @@ fn summary<S: Schema>(snapshot: &Snapshot<S>, setting: &Setting<'_>) -> String {
             let choices = choices.resolve(snapshot);
             let on = choices
                 .iter()
-                .filter(|choice| listed.contains(&Value::String(choice.value.clone())) != inverted)
+                .filter(|choice| listed.contains(&Value::String(choice.value.clone())) != *inverted)
                 .count();
             format!("{on} of {} on", choices.len())
         }
@@ -620,8 +620,8 @@ fn summary<S: Schema>(snapshot: &Snapshot<S>, setting: &Setting<'_>) -> String {
                 .fields
                 .iter()
                 .filter_map(|field| {
-                    let value = value.get(field.key).filter(|value| !value.is_null())?;
-                    Some(match field.kind {
+                    let value = value.get(&*field.key).filter(|value| !value.is_null())?;
+                    Some(match &field.kind {
                         Kind::Number { unit, .. } => format!("{}{unit}", plain(value)),
                         _ => plain(value),
                     })

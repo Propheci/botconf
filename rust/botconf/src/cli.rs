@@ -140,7 +140,7 @@ fn render_listing(listing: &Listing) -> String {
 }
 
 fn render_entry(entry: &ValueEntry) -> String {
-    match entry.description {
+    match &entry.description {
         Some(description) => format!("{}\n    {description}", value_line(entry)),
         None => value_line(entry),
     }
@@ -209,7 +209,7 @@ mod tests {
             description,
         };
         let listing = Listing {
-            settings: vec![entry("admins", Some("Who's in charge"))],
+            settings: vec![entry("admins", Some("Who's in charge".into()))],
             entries: vec![entry("access.lamp", None)],
             ignored: vec![("disabled".into(), "bad".into())],
         };

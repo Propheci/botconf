@@ -78,7 +78,8 @@ impl SectionSettings {
     /// any: a declaration mistake.
     pub fn check(&self) -> Option<&'static str> {
         let defaults = self.parse(None).ok()?;
-        self.runtime.iter().map(|setting| setting.key).find(|key| {
+        let runtime: &'static [RuntimeSetting] = self.runtime;
+        runtime.iter().map(|setting| &*setting.key).find(|key| {
             let pointer = format!("/{}", key.replace('.', "/"));
             defaults.json().pointer(&pointer).is_none()
         })
