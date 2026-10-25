@@ -58,6 +58,8 @@ pub struct Listing {
     pub entries: Vec<ValueEntry>,
     /// Stored values that are not applied, with the reason.
     pub ignored: Vec<(String, String)>,
+    /// Stored values waiting for their section to register.
+    pub parked: Vec<(String, Value)>,
 }
 
 pub enum Outcome<S: Schema> {
@@ -190,9 +192,16 @@ fn listing<S: Schema>(store: &SettingsStore<S>) -> Listing {
         .map(|(key, reason)| (key.clone(), reason.clone()))
         .collect();
 
+    let parked = snapshot
+        .parked()
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+
     Listing {
         settings,
         entries,
         ignored,
+        parked,
     }
 }

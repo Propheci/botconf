@@ -140,6 +140,17 @@ fn render_listing(listing: &Listing, command: &str) -> String {
         }
     }
 
+    if !listing.parked.is_empty() {
+        text.push_str(&format!("\n\n{}", bold("Waiting for their section")));
+        for (key, value) in &listing.parked {
+            text.push_str(&format!(
+                "\n{} = {}",
+                code_inline(key),
+                code_inline(&value.to_string())
+            ));
+        }
+    }
+
     text.push_str("\n\n");
     text.push_str(&escape(&format!("Send /{command} help for the syntax.")));
     text

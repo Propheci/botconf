@@ -62,6 +62,7 @@
 #[cfg(feature = "cli")]
 pub mod cli;
 pub mod command;
+mod dynamic;
 pub mod keys;
 pub mod kind;
 mod provider;
@@ -74,6 +75,7 @@ mod store;
 use serde::{Serialize, de::DeserializeOwned};
 
 pub use self::{
+    dynamic::{DynamicSection, Validator},
     keys::{Catalog, CatalogEntry, RuntimeSetting, UnknownKey},
     kind::{Choice, Choices, DynamicChoices, Field, FixedChoice, Form, Kind},
     section::{ParsedSection, Section, SectionSettings},
@@ -103,6 +105,13 @@ pub trait Schema: Send + Sync + Sized + 'static {
 
     /// The typed parts of the configuration, e.g. one per feature.
     fn sections(&self) -> Vec<Section> {
+        Vec::new()
+    }
+
+    /// Key prefixes, e.g. `connectors`, below which sections may be
+    /// [registered at runtime](SettingsStore::register_section). Stored
+    /// overrides below them wait for their section instead of being ignored.
+    fn dynamic_namespaces(&self) -> Vec<&'static str> {
         Vec::new()
     }
 

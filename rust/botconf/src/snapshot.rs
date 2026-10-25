@@ -3,7 +3,7 @@ use std::{any::Any, collections::BTreeMap, fmt, sync::Arc};
 use figment::{Figment, Source as FigmentSource};
 use serde_json::Value;
 
-use crate::{Schema, keys::is_below, provider, section::ParsedSection};
+use crate::{Schema, dynamic::DynamicParsed, keys::is_below, provider, section::ParsedSection};
 
 /// Where the effective value of a key comes from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,11 +37,16 @@ pub struct Snapshot<S: Schema> {
     pub(crate) schema: Arc<S>,
     /// The parsed sections, by id, with their path.
     pub(crate) sections: BTreeMap<&'static str, (String, ParsedSection)>,
+    /// The sections registered at runtime, by id.
+    pub(crate) dynamic: BTreeMap<String, DynamicParsed>,
     /// The overrides in effect, by key.
     pub(crate) overrides: BTreeMap<String, Value>,
     /// Stored overrides that are not applied because they are invalid (e.g.
     /// they refer to something that no longer exists), with the reason.
     pub(crate) ignored: BTreeMap<String, String>,
+    /// Stored overrides below a dynamic namespace whose section is not
+    /// registered (yet): they apply when it registers.
+    pub(crate) parked: BTreeMap<String, Value>,
     pub(crate) figment: Figment,
 }
 
@@ -51,6 +56,7 @@ impl<S: Schema> fmt::Debug for Snapshot<S> {
         f.debug_struct("Snapshot")
             .field("overrides", &self.overrides.keys().collect::<Vec<_>>())
             .field("ignored", &self.ignored)
+            .field("waiting", &self.parked.keys().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
 }
@@ -74,8 +80,34 @@ impl<S: Schema> Snapshot<S> {
         &self.ignored
     }
 
+    /// Stored overrides waiting for their section to register.
+    pub fn parked(&self) -> &BTreeMap<String, Value> {
+        &self.parked
+    }
+
+    /// The validated value of a section registered at runtime.
+    pub fn dynamic(&self, id: &str) -> Option<&Value> {
+        Some(&self.dynamic.get(id)?.value)
+    }
+
+    /// The section registered at runtime that `key` belongs to, with the key
+    /// relative to it.
+    fn dynamic_of<'a>(&self, key: &'a str) -> Option<(&DynamicParsed, &'a str)> {
+        self.dynamic.values().find_map(|section| {
+            if key == section.path {
+                return Some((section, ""));
+            }
+            let relative = key.strip_prefix(section.path.as_str())?.strip_prefix('.')?;
+            Some((section, relative))
+        })
+    }
+
     /// The effective value of a (dotted) key, defaults included.
     pub fn value(&self, key: &str) -> Option<Value> {
+        if let Some((section, relative)) = self.dynamic_of(key) {
+            return section.value.pointer(&to_pointer(relative)).cloned();
+        }
+
         // Sections: from the parsed settings, which include defaults.
         for (path, parsed) in self.sections.values() {
             if key == path || is_below(key, path) {
@@ -90,7 +122,11 @@ impl<S: Schema> Snapshot<S> {
 
     /// Where the effective value of a key comes from.
     pub fn source(&self, key: &str) -> Source {
-        let Some(metadata) = self.figment.find_metadata(key) else {
+        let (figment, key) = match self.dynamic_of(key) {
+            Some((section, relative)) => (&section.figment, relative),
+            None => (&self.figment, key),
+        };
+        let Some(metadata) = figment.find_metadata(key) else {
             return Source::Default;
         };
 

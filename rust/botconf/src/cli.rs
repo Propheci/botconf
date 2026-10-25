@@ -136,6 +136,15 @@ fn render_listing(listing: &Listing) -> String {
         ));
     }
 
+    if !listing.parked.is_empty() {
+        let lines: Vec<_> = listing
+            .parked
+            .iter()
+            .map(|(key, value)| format!("{key} = {value}"))
+            .collect();
+        sections.push(format!("Waiting for their section:\n{}", lines.join("\n")));
+    }
+
     sections.join("\n\n")
 }
 
@@ -212,6 +221,7 @@ mod tests {
             settings: vec![entry("admins", Some("Who's in charge".into()))],
             entries: vec![entry("access.lamp", None)],
             ignored: vec![("disabled".into(), "bad".into())],
+            parked: Vec::new(),
         };
 
         // Any schema: the listing doesn't depend on it.
@@ -233,6 +243,20 @@ mod tests {
             render(&Outcome::<Any>::Listing(listing)),
             "admins = [1] (stored)\n    Who's in charge\n\nPer-entry overrides:\naccess.lamp = \
              [1] (stored)\n\nIgnored stored values (unset them):\ndisabled: bad"
+        );
+    }
+
+    #[test]
+    fn lists_the_overrides_waiting_for_their_section() {
+        let listing = Listing {
+            settings: Vec::new(),
+            entries: Vec::new(),
+            ignored: Vec::new(),
+            parked: vec![("connectors.a.limit".into(), json!(7))],
+        };
+        assert!(
+            render_listing(&listing)
+                .ends_with("Waiting for their section:\nconnectors.a.limit = 7")
         );
     }
 }
