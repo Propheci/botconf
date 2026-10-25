@@ -157,7 +157,7 @@ impl<'a> Setting<'a> {
     /// The kind of the form holding the field.
     fn form_kind(&self) -> &'a Kind {
         match (self.entry, &self.setting.kind) {
-            (Some(_), Kind::Map { value, .. }) => &**value,
+            (Some(_), Kind::Map { value, .. }) => value,
             (_, kind) => kind,
         }
     }
