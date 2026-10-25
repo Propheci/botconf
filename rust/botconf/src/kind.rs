@@ -1,6 +1,7 @@
 //! What the value of a runtime setting looks like, so that front ends (e.g. a
 //! chat settings panel) can offer a fitting editor: toggles, pickers, a list
-//! of users, a form, ...
+//! of references (users, chats, ...) with pickers for their domain, a form,
+//! ...
 //!
 //! The kind is only a hint for editing: every value is still validated by
 //! deserializing the whole configuration.
@@ -47,12 +48,15 @@ pub enum Kind {
         /// features).
         inverted: bool,
     },
-    /// A chat id.
-    Chat,
-    /// A list of user ids.
-    Users,
-    /// A list of chat ids.
-    Chats,
+    /// References to things outside the configuration: users, chats, accounts.
+    /// `domain` says what they refer to (e.g. `telegram.user`, `wuphf.chat`),
+    /// so front ends know how to pick them and how to name them; botconf
+    /// itself never interprets the ids.
+    Ref {
+        domain: &'static str,
+        /// A list of references, rather than one.
+        many: bool,
+    },
     /// An object whose fields are edited one by one.
     Form(&'static Form),
     /// A map of named entries, set one by one (see
@@ -69,7 +73,7 @@ impl Kind {
     /// obvious one (an empty list, a form's initial value).
     pub fn empty_value(&self) -> Option<Value> {
         match self {
-            Self::SetOf { .. } | Self::Users | Self::Chats => Some(Value::Array(Vec::new())),
+            Self::SetOf { .. } | Self::Ref { many: true, .. } => Some(Value::Array(Vec::new())),
             Self::Form(form) => serde_json::from_str(form.initial).ok(),
             _ => None,
         }
@@ -217,5 +221,24 @@ impl Choices {
             },
             Self::Dynamic(DynamicChoices(list)) => list(view),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reference_lists_start_empty_and_single_references_have_no_default() {
+        let many = Kind::Ref {
+            domain: "test.user",
+            many: true,
+        };
+        let one = Kind::Ref {
+            domain: "test.user",
+            many: false,
+        };
+        assert_eq!(many.empty_value(), Some(Value::Array(Vec::new())));
+        assert_eq!(one.empty_value(), None);
     }
 }

@@ -62,7 +62,10 @@ impl Schema for Toy {
     fn settings(&self) -> Vec<RuntimeSetting> {
         vec![
             RuntimeSetting::new("greeting", "What to say"),
-            RuntimeSetting::new("admins", "Who's in charge").kind(Kind::Users),
+            RuntimeSetting::new("admins", "Who's in charge").kind(Kind::Ref {
+                domain: "test.user",
+                many: true,
+            }),
             RuntimeSetting::per_entry("limits", "Per-feature limits", &Kind::Json),
         ]
     }
