@@ -1,0 +1,12 @@
+# Rust
+/target/
+
+# Nix
+/result
+/result-*
+/.direnv/
+
+# Go build output (binaries from `go build` in examples or tools)
+/go/bin/
+*.test
+*.out
