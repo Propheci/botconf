@@ -22,8 +22,9 @@ pub struct StoredOverride {
     pub key: String,
     /// The JSON-encoded value.
     pub value: String,
-    /// Who changed it (e.g. a Telegram user id), if known.
-    pub by: Option<i64>,
+    /// Who changed it (e.g. a Telegram user id, `123456789@lid`), if known.
+    /// botconf records it and never interprets it.
+    pub by: Option<String>,
 }
 
 /// Keeps the overrides.

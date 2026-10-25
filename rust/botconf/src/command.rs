@@ -119,7 +119,7 @@ impl<S: Schema> Outcome<S> {
 pub async fn execute<S: Schema>(
     store: &SettingsStore<S>,
     command: SettingsCommand,
-    by: Option<i64>,
+    by: Option<String>,
 ) -> Result<Outcome<S>, SettingsError> {
     let (key, change) = match command {
         SettingsCommand::List => return Ok(Outcome::Listing(listing(store))),

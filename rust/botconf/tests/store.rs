@@ -116,7 +116,10 @@ async fn changes_apply_immediately_and_persist() {
     let storage = Arc::new(MemoryStorage::new());
     let store = store_with(Arc::clone(&storage)).await;
 
-    let change = store.set("admins", json!([5, 6]), Some(1)).await.unwrap();
+    let change = store
+        .set("admins", json!([5, 6]), Some("1".into()))
+        .await
+        .unwrap();
     assert_eq!(change.previous.derived, 0);
     assert_eq!(change.current.derived, 2);
     assert_eq!(store.current().config.admins, [5, 6]);
@@ -127,7 +130,7 @@ async fn changes_apply_immediately_and_persist() {
         [StoredOverride {
             key: "admins".into(),
             value: "[5,6]".into(),
-            by: Some(1),
+            by: Some("1".into()),
         }]
     );
 

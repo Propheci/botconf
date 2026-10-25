@@ -145,7 +145,7 @@ impl<S: Schema> SettingsStore<S> {
         &self,
         key: &str,
         value: Value,
-        by: Option<i64>,
+        by: Option<String>,
     ) -> Result<Change<S>, SettingsError> {
         self.modify(key, by, |_| Ok(value)).await
     }
@@ -155,7 +155,7 @@ impl<S: Schema> SettingsStore<S> {
         &self,
         key: &str,
         item: Value,
-        by: Option<i64>,
+        by: Option<String>,
     ) -> Result<Change<S>, SettingsError> {
         self.extend(key, vec![item], by).await
     }
@@ -166,7 +166,7 @@ impl<S: Schema> SettingsStore<S> {
         &self,
         key: &str,
         new_items: Vec<Value>,
-        by: Option<i64>,
+        by: Option<String>,
     ) -> Result<Change<S>, SettingsError> {
         self.modify(key, by, |current| {
             let mut items = as_list(key, current)?;
@@ -185,7 +185,7 @@ impl<S: Schema> SettingsStore<S> {
         &self,
         key: &str,
         item: Value,
-        by: Option<i64>,
+        by: Option<String>,
     ) -> Result<Change<S>, SettingsError> {
         self.modify(key, by, |current| {
             let mut items = as_list(key, current)?;
@@ -200,7 +200,7 @@ impl<S: Schema> SettingsStore<S> {
     pub async fn delete_entry(
         &self,
         entry_key: &str,
-        by: Option<i64>,
+        by: Option<String>,
     ) -> Result<Change<S>, SettingsError> {
         let setting = self.catalog.resolve(entry_key)?;
         let Some(name) = setting.entry_of(entry_key) else {
@@ -266,7 +266,7 @@ impl<S: Schema> SettingsStore<S> {
     async fn modify(
         &self,
         key: &str,
-        by: Option<i64>,
+        by: Option<String>,
         new_value: impl FnOnce(Option<Value>) -> Result<Value, SettingsError>,
     ) -> Result<Change<S>, SettingsError> {
         self.catalog.resolve(key)?;
@@ -310,7 +310,7 @@ impl<S: Schema> SettingsStore<S> {
             .await
             .map_err(SettingsError::Storage)?;
 
-        tracing::info!(key, %value, ?by, "runtime setting changed");
+        tracing::info!(key, %value, by = ?stored.by, "runtime setting changed");
         Ok(self.publish(snapshot))
     }
 
