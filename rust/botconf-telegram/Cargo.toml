@@ -3,7 +3,9 @@ name = "botconf-telegram"
 description = "A Telegram settings panel (buttons, pickers, prompts) for botconf settings"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+# takecell 0.1.2 (teloxide-core 0.13) declares 1.96; the crate itself needs
+# no more than the workspace's 1.95.
+rust-version = "1.96"
 license.workspace = true
 repository.workspace = true
 
@@ -17,6 +19,6 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-figment = { workspace = true }
-serde = { workspace = true }
-tokio = { workspace = true, features = ["test-util"] }
+figment = { workspace = true, features = ["env", "toml"] }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test-util"] }

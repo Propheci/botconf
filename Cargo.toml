@@ -5,20 +5,26 @@ resolver = "3"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-# Unchanged from the assistant bot for now; plan 002 sets the real minimum.
-rust-version = "1.98"
+# The lowest version that builds and passes; CI tests it.
+rust-version = "1.95"
 license = "MIT"
 repository = "https://github.com/propheci/botconf"
 
 [workspace.dependencies]
 botconf = { path = "rust/botconf" }
 
-anyhow = "1.0.104"
-arc-swap = "1.9.2"
+# These are libraries, so the requirements are floors, not pins: the oldest
+# releases that resolve and pass with `cargo update -Z direct-minimal-versions`
+# (some floors, e.g. thiserror and serde, are set by teloxide and sea-orm), with
+# only the features the crates use. Dependents keep their own lock files and
+# turn on more features themselves (the assistant bot enables serde_json's
+# `preserve_order`; botconf does not need it). CI builds with the lock file.
+anyhow = "1.0.80"
+arc-swap = "1.6"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde"] }
-clap = { version = "4.6.7", features = ["derive", "env"] }
-figment = { version = "0.10.19", features = ["env", "toml"] }
-futures = "0.3.34"
+clap = { version = "4.5", features = ["derive"] }
+figment = "0.10.19"
+futures = "0.3.30"
 sea-orm = { version = "2.0.3", default-features = false, features = [
   "macros",
   "with-chrono",
@@ -26,11 +32,8 @@ sea-orm = { version = "2.0.3", default-features = false, features = [
   "sqlx-postgres",
   "sqlx-sqlite",
 ] }
-serde = { version = "1.0.229", features = ["derive"] }
-# `preserve_order`: JSON objects keep the order they are written in. The
-# assistant bot relies on it for its AI schemas, and values render in the
-# order they were declared.
-serde_json = { version = "1.0.151", features = ["preserve_order"] }
+serde = "1.0.219"
+serde_json = "1.0.142"
 teloxide = { version = "0.17.0", default-features = false, features = [
   "cache-me",
   "ctrlc_handler",
@@ -39,6 +42,6 @@ teloxide = { version = "0.17.0", default-features = false, features = [
   "throttle",
   "tracing",
 ] }
-thiserror = "2.0.21"
-tokio = { version = "1.53.1", features = ["full"] }
-tracing = "0.1.44"
+thiserror = "2.0.18"
+tokio = "1.39"
+tracing = "0.1.40"
