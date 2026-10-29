@@ -27,7 +27,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 2 | 002 | Declare the minimum Rust versions (1.95, 1.96 for botconf-telegram) and test them in CI | P1 | S | 001 | `v0.1.1` | DONE |
 | 3 | 003 | `Kind::Ref { domain, many }` replaces the Telegram id kinds; actors become strings | P1 | M | 001, 002 | `v0.2.0` | DONE (see execution notes; the assistant bot moved to `v0.2.0` in its `e6f8e83`) |
 | 4 | 009 | Owned descriptors (`Shared`) and sections registered at runtime | P1 | L | 003 | `v0.3.0` | DONE (see execution notes; the assistant bot moved to `v0.3.0` in its `a815f3b`) |
-| 5 | 004 | Platform-neutral panel engine (`botconf-panel`) with hybrid tokens; botconf-telegram renders it | P1 | L | 003, 009 | `v0.4.0` | DONE (see execution notes) |
+| 5 | 004 | Platform-neutral panel engine (`botconf-panel`) with hybrid tokens; botconf-telegram renders it | P1 | L | 003, 009 | `v0.4.0` | DONE (see execution notes; assistant bot branch `botconf-v0.4` pending the owner) |
 | 6 | 005 | `botconf.v1.Settings` gRPC service (`botconf-grpc`) | P1 | L | 004, 009 | `v0.5.0` | TODO |
 | 7 | 006 | Go module and settings client | P1 | M | 005 | `v0.6.0`, `go/v0.6.0` | TODO |
 | 8 | 007 | Go panel renderers: Telegram bots, Telegram user accounts (inline-bot trick), Discord | P2 | L | 006 | `v0.7.0`, `go/v0.7.0` | TODO |
@@ -341,3 +341,14 @@ each is marked in its plan):
     `expired_handles_are_purged_hourly`) drive the token issuer directly.
   - **Skipped:** `nix flake check` and the minimum-version jobs (CI runs
     them on the pushed commits), and taplo.
+  - **Step 7 (assistant bot)** is on its branch `botconf-v0.4` (commit
+    `e356c41`), for the owner to merge: pinned to `v0.4.0` with
+    `botconf-telegram`'s `sea-orm` feature, a `panel_tokens` migration and
+    `SeaOrmTokenStore` on the panel. The migration writes the table out
+    (the same columns as `create_tokens_table`) instead of calling it, since
+    the assistant's migration crate does not depend on botconf; the new
+    test `panel_tokens_keep_button_handles` stores and reads a handle through
+    `SeaOrmTokenStore`, and fails without the migration. `cargo test --lib`
+    passes (312), clippy and rustfmt are clean, and `migrate` on a copy of
+    the bot's SQLite file created the table. The test of the earlier actor
+    migration found it by position from the end; it now finds it by name.
