@@ -27,7 +27,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 2 | 002 | Declare the minimum Rust versions (1.95, 1.96 for botconf-telegram) and test them in CI | P1 | S | 001 | `v0.1.1` | DONE |
 | 3 | 003 | `Kind::Ref { domain, many }` replaces the Telegram id kinds; actors become strings | P1 | M | 001, 002 | `v0.2.0` | DONE (see execution notes; the assistant bot moved to `v0.2.0` in its `e6f8e83`) |
 | 4 | 009 | Owned descriptors (`Shared`) and sections registered at runtime | P1 | L | 003 | `v0.3.0` | DONE (see execution notes; the assistant bot moved to `v0.3.0` in its `a815f3b`) |
-| 5 | 004 | Platform-neutral panel engine (`botconf-panel`) with hybrid tokens; botconf-telegram renders it | P1 | L | 003, 009 | `v0.4.0` | TODO |
+| 5 | 004 | Platform-neutral panel engine (`botconf-panel`) with hybrid tokens; botconf-telegram renders it | P1 | L | 003, 009 | `v0.4.0` | DONE (see execution notes) |
 | 6 | 005 | `botconf.v1.Settings` gRPC service (`botconf-grpc`) | P1 | L | 004, 009 | `v0.5.0` | TODO |
 | 7 | 006 | Go module and settings client | P1 | M | 005 | `v0.6.0`, `go/v0.6.0` | TODO |
 | 8 | 007 | Go panel renderers: Telegram bots, Telegram user accounts (inline-bot trick), Discord | P2 | L | 006 | `v0.7.0`, `go/v0.7.0` | TODO |
@@ -282,3 +282,62 @@ each is marked in its plan):
   - **Skipped:** `nix flake check` and the 1.96 job (CI runs both on the
     pushed commits), and taplo (not on the shell's path; the only TOML change
     is the version line).
+- **004 done 2026-10-29** (tag `v0.4.0`). `botconf-panel` holds the screens,
+  the presses, the answers and the text command, with no platform
+  dependency (`cargo tree -p botconf-panel -e normal | grep -c teloxide` is
+  0). `botconf-telegram` draws its screens: `render.rs` turns spans into
+  Telegram HTML and rows into inline keyboards, `input.rs` turns questions
+  into messages with Telegram's pickers and answers into `Input`, and
+  `handlers.rs` keeps the questions in `Prompts`. Its public API is
+  unchanged, plus `token_store`, `token_ttl`, `engine()` and the `sea-orm`
+  feature. Tests (dev shell, 1.98.1, `--all-features`): `botconf` 19 + 10
+  store + 10 dynamic + 1 doc, `botconf-panel` 37, `botconf-telegram` 10;
+  every test name from the baseline still exists in one of the two crates.
+  `botconf-panel` checks on rustc 1.95. Clippy (warnings denied) and the
+  nightly rustfmt are clean. Removing the remove-item value check or binding
+  dynamic picks by position each makes a test fail
+  (`removing_an_item_removes_that_value`, `dynamic_picks_bind_the_value`).
+  Step 5: the assistant bot's `cargo test --lib` (311 passed) ran against
+  this tree through a temporary `[patch]`, with no source change there.
+  Deviations:
+  - **Total encoding.** Entry names and section ids are escaped in tokens
+    (`%25`, `%3A`, `%23`, `%40`), so every action has a stateless encoding
+    and a handle can always store it; names with `:` or `#`, refused before,
+    now get buttons. An unknown `%` sequence reads back literally, so tokens
+    drawn before still parse. A screen's part number follows the page after
+    `@` (`o:m:lamp@1`).
+  - **`Add(Target, Value)`** is a new action (`A:<target>:<json>`), for the
+    suggested references of `Names::candidates`.
+  - **`Domain` describes how to ask**, not only how to parse and count: what
+    to send for one or several ids, an example id, what the front end's
+    picker picks, and why an unknown word is not an id. With these the
+    Telegram questions read exactly as before, and an unregistered domain
+    gets the generic wording the panel used for other domains. `Viewer`
+    gained `pickers` (whether the front end's pickers work in this
+    conversation), and `Ask` gained `title` (Telegram's input placeholder)
+    and `rows` (the suggestions). The engine leaves "how to stop" to the
+    front end (Telegram adds "Tap Cancel" or "Send /cancel").
+  - **`Panel::stored_label`** names the source of a value changed from the
+    panel (default "changed at runtime ✏️"); `botconf-telegram` keeps
+    "changed from Telegram ✏️".
+  - **`Panel::clock`** sets the time source, so expiry is tested without
+    sleeping.
+  - **`SettingsStore::dynamic_sections()`** (new, in `botconf`) lists the
+    sections registered at runtime, so the home screen can show them after
+    the schema's, sorted by title, with their own title and description.
+  - **Picked ids must match the setting's domain.** A chat picked for a list
+    of users is refused; before, it was added.
+  - **Suggestions in Telegram** go on the question message as an inline
+    keyboard (when there is no picker keyboard); pressing one answers the
+    question and updates the panel that asked.
+  - **Tests moved and added.** The 9 scenario tests of `handlers.rs`, the 2
+    reading tests of `input.rs` and the 3 of `text.rs` run in the engine
+    against tokens taken from rendered screens (`reads_answers_by_kind` uses
+    `Input::Picked` for Telegram's shared users and chats; the conversion
+    of those messages is `picker_messages_become_picked_ids` in
+    `botconf-telegram`). `data_that_does_not_fit_is_refused` tests issuing:
+    no handle when even 11 bytes do not fit, a handle otherwise. The handle
+    tests (`redrawing_reuses_handles`, `colliding_handles_take_the_next_key`,
+    `expired_handles_are_purged_hourly`) drive the token issuer directly.
+  - **Skipped:** `nix flake check` and the minimum-version jobs (CI runs
+    them on the pushed commits), and taplo.

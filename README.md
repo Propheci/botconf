@@ -23,7 +23,8 @@ with buttons, a command line, or a remote client.
 ```
 rust/      the Rust crates
   botconf/            the core: schema, layering, store, storage, commands
-  botconf-telegram/   a Telegram (teloxide) settings panel
+  botconf-panel/      the settings panel engine: screens, buttons, answers
+  botconf-telegram/   a Telegram (teloxide) front end for the panel
 proto/     the wire contract (botconf.v1.Settings), shared by Rust and Go
 go/        the Go module: a client for remote settings and panel renderers
 plans/     implementation plans (see plans/README.md)
@@ -34,8 +35,9 @@ plans/     implementation plans (see plans/README.md)
 The Rust crates live in `rust/`. They moved here from
 [assistant_bot_rs](https://github.com/akshettrj/assistant_bot_rs) with their
 history ([plan 001](plans/001-extract-crates.md)); their earlier life inside
-that bot's `src/settings/` stays in its repository. The remote settings
-service, the shared panel engine and the Go SDK follow in plans 002–009.
+that bot's `src/settings/` stays in its repository. The panel engine
+(`botconf-panel`) landed in plan 004; the remote settings service and the Go
+SDK follow in plans 005–007.
 [`plans/README.md`](plans/README.md) has the order and the status of each.
 
 Develop inside the Nix dev shell (`nix develop`, or `direnv allow`), which
@@ -52,12 +54,17 @@ not from crates.io or a Go proxy release:
 # Cargo.toml
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
 # SeaORM) and `cli` (a clap subcommand to view and change the settings).
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.3.0", features = ["cli", "sea-orm"] }
-# A Telegram settings panel (teloxide) over a botconf store.
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.3.0" }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.4.0", features = ["cli", "sea-orm"] }
+# The settings panel engine, for writing a front end. Feature: `sea-orm`
+# (keep the handles of long buttons in a SQL table).
+botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.4.0" }
+# A Telegram settings panel (teloxide) over a botconf store, drawn by the
+# engine. Feature: `sea-orm` (as above).
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.4.0", features = ["sea-orm"] }
 ```
 
-Minimum Rust: 1.95 for `botconf`, 1.96 for `botconf-telegram` (its teloxide
+Minimum Rust: 1.95 for `botconf` and `botconf-panel`, 1.96 for
+`botconf-telegram` (its teloxide
 pulls in takecell 0.1.2, which declares 1.96). The dependency requirements
 are floors, and botconf turns on only the features it uses, so a host keeps
 its own lock file; for example, enable serde_json's `preserve_order` in the
@@ -168,6 +175,63 @@ store.register_section(DynamicSection {
   rather than another setting.
 - `remove_section(id)` drops the section; its stored overrides wait for it to
   come back.
+- `dynamic_sections()` lists them, e.g. for a settings panel.
+
+### Writing a front end
+
+`botconf-panel` computes the settings panel once, as platform-neutral
+screens: a home screen, one per section (registered ones included), and one
+per setting with an editor fitting its kind. A front end only draws them and
+reports what the user did:
+
+1. Build a `Panel` over the store, and register what the front end knows
+   about reference domains with `Panel::domain` (how ids are typed, counted
+   and asked for, and whether it has a picker for them).
+2. For each user, build a `Viewer`: who is acting (recorded as the author of
+   changes), the front end's `Limits` (the longest button token, the longest
+   message, how many rows and buttons per row fit), its `Names` for
+   references, and whether its pickers work in this conversation.
+3. Draw `Panel::render`'s `Screen`: its `Text` is a list of styled spans
+   (plain, bold, italic, code, code block) for the front end to turn into
+   its own markup; its rows are buttons, each with a label and a token.
+4. Send a pressed button's token back to `Panel::press` unread, and act on the
+   `Reaction`: redraw the panel with `screen`, post `post` as a new message,
+   show `notice`, delete the panel when `closed`, or put the `Ask` to the
+   user.
+5. Keep the `Ask`'s `Question` until the user answers, then pass the answer to
+   `Panel::answer` as an `Input` (typed text, ids picked with a picker, or a
+   cancel). The engine keeps no conversation state; `Question::encode` gives a
+   compact form for front ends that keep it as text.
+6. On `PanelError::Stale`, show the notice and redraw the panel with the
+   screen it carries; on `PanelError::Rejected`, show the reason and keep the
+   panel.
+
+`Panel::command_text` handles the text form of the command (`list`, `get`,
+`set`, ...). Screens longer than `Limits::max_rows` are cut into parts with
+◀ / ▶ buttons. `botconf-telegram` is the reference front end.
+
+### Tokens
+
+A button's token is the stateless encoding of its action (e.g. `o:h`,
+`t:0:1`) when that fits the front end's `Limits::token_bytes`, and otherwise a
+handle: `~` and 10 characters, kept in a `TokenStore` with the action it
+stands for. Actions name the exact values they act on (a picked choice from
+a computed list, a list item to remove), never a position in a list that may
+have changed, so a press can't act on the wrong value; if the value is gone,
+the press is `Stale` and the panel redraws.
+
+The same action always gets the same handle, so redrawing a screen renews it
+rather than adding one. Handles expire after 30 days without being drawn
+(`Panel::token_ttl`), and expired ones are purged at most hourly while new
+ones are stored (or with `Panel::purge_tokens`). An expired or unknown
+handle redraws the home screen with "This panel is out of date".
+
+`Panel::new` keeps handles in memory, so they stop working when the program
+restarts. A host whose ids are long (most buttons then need handles) should
+keep them in its database: with the `sea-orm` feature, create the table in a
+migration with `create_tokens_table(DEFAULT_TOKENS_TABLE)` (`key`, `action`,
+`expires_at` in milliseconds) and pass `SeaOrmTokenStore` to
+`Panel::token_store`, or implement `TokenStore` over the host's own storage.
 
 ### Versions and tags
 

@@ -32,6 +32,9 @@ jobs:
           - package: botconf
             toolchain: "1.95.0"
             args: --all-features
+          - package: botconf-panel
+            toolchain: "1.95.0"
+            args: --all-features
           - package: botconf-telegram
             toolchain: "1.96.0"
             args: ""
