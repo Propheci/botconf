@@ -38,8 +38,8 @@ The Rust crates live in `rust/`. They moved here from
 history ([plan 001](plans/001-extract-crates.md)); their earlier life inside
 that bot's `src/settings/` stays in its repository. The panel engine
 (`botconf-panel`) landed in plan 004 and the gRPC service (`botconf-grpc`) in
-plan 005, and the Go client (`go/settings`) in plan 006; the Go panel
-renderers follow in plan 007.
+plan 005, the Go client (`go/settings`) in plan 006, and the Go panel
+renderers (`go/render/telegram`, `go/render/discord`) in plan 007.
 [`plans/README.md`](plans/README.md) has the order and the status of each.
 
 Develop inside the Nix dev shell (`nix develop`, or `direnv allow`), which
@@ -57,16 +57,16 @@ not from crates.io or a Go proxy release:
 # Cargo.toml
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
 # SeaORM) and `cli` (a clap subcommand to view and change the settings).
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.6.0", features = ["cli", "sea-orm"] }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.7.0", features = ["cli", "sea-orm"] }
 # The settings panel engine, for writing a front end. Feature: `sea-orm`
 # (keep the handles of long buttons in a SQL table).
-botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.6.0" }
+botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.7.0" }
 # A Telegram settings panel (teloxide) over a botconf store, drawn by the
 # engine. Feature: `sea-orm` (as above).
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.6.0", features = ["sea-orm"] }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.7.0", features = ["sea-orm"] }
 # The gRPC service (tonic 0.12) serving a store and its panel to remote
 # clients. Building it needs `protoc` on the PATH.
-botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.6.0" }
+botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.7.0" }
 ```
 
 Minimum Rust: 1.95 for `botconf`, `botconf-panel` and `botconf-grpc`, 1.96
@@ -78,7 +78,7 @@ host if you want JSON objects to keep their written order.
 
 ```sh
 # Go: the settings client (see "Go" below)
-go get github.com/propheci/botconf/go@go/v0.6.0
+go get github.com/propheci/botconf/go@go/v0.7.0
 ```
 
 ### Reference kinds
@@ -333,6 +333,53 @@ Regenerate the bindings with `scripts/gen-go.sh` (protoc-gen-go 1.36.11 and
 protoc-gen-go-grpc 1.6.2, as CI checks). `go test -tags integration
 ./settings/...` runs the client against the Rust server (`botconf-grpc`'s
 `toy_server` example; needs cargo and protoc).
+
+### Go renderers
+
+The renderers draw the panel a server sends and send presses, answers and
+commands back; they decide nothing about settings, and a token goes back
+exactly as received. Each package depends only on the client and its
+platform library, so a Telegram program does not pull in discordgo.
+
+`go/render/telegram` (gotd):
+
+- **Bot sessions**: `NewBotPanel(client, api)`. `Open` posts the panel as a
+  message with an inline keyboard (callback data `cfg:` plus the token;
+  `WithPrefix` changes it). Route the bot's callback queries to
+  `HandleCallback`, which answers every press exactly once, its messages to
+  `HandleMessage` (a pending question's answer, `/cancel` to give up), and
+  picker service messages to `HandleService`. `Command` runs the text form
+  (`set x 1`). `WithPickers` offers Telegram's user and chat pickers in
+  private chats for `telegram.user` and `telegram.chat` questions.
+- **User accounts**: a user account cannot attach buttons to its messages,
+  so `NewInlinePanel(client, userAPI, helperBot, helperBotUser, ownUserID)`
+  goes through a **helper bot** in inline mode. The account asks the bot for
+  inline results with a random single-use token (two minutes); the bot
+  answers only the account's own query, with the screen and its keyboard;
+  the account sends the result, so the message carries the bot's buttons.
+  Presses reach the bot (`HandleInlineCallback`), which edits the message on
+  the data center that holds it. Route the bot's inline queries to
+  `HandleInlineQuery` and the account's own outgoing messages to
+  `HandleMessage` (answers to questions, in the chat the panel was last
+  opened in). Without a helper bot, or when the trip through it fails or
+  takes over five seconds, the panel is sent as text with numbered options;
+  replying with a number presses one.
+
+  To set up the helper bot: create a bot with @BotFather, turn on inline
+  mode (`/setinline`), and run it as a second gotd client in the same
+  program (`*telegram.Client` satisfies `HelperBot`).
+
+`go/render/discord` (discordgo): `NewPanel(client, session)`. `Open` posts
+the panel with buttons; route interactions to `HandleInteraction`. A press
+updates the message (one slower than two seconds is acknowledged first and
+the message edited afterwards); a question opens a modal with the current
+value filled in, or Discord's user or channel select menu for
+`discord.user` and `discord.channel` questions; notices and refusals are
+shown to the presser only. It needs no gateway intents beyond receiving
+interactions.
+
+`go/settings/settingstest` serves a scripted settings server in memory, for
+testing code built on the client.
 
 ### Versions and tags
 

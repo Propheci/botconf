@@ -30,7 +30,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 5 | 004 | Platform-neutral panel engine (`botconf-panel`) with hybrid tokens; botconf-telegram renders it | P1 | L | 003, 009 | `v0.4.0` | DONE (see execution notes; assistant bot branch `botconf-v0.4` pending the owner) |
 | 6 | 005 | `botconf.v1.Settings` gRPC service (`botconf-grpc`) | P1 | L | 004, 009 | `v0.5.0` | DONE (see execution notes) |
 | 7 | 006 | Go module and settings client | P1 | M | 005 | `v0.6.0`, `go/v0.6.0` | DONE (see execution notes) |
-| 8 | 007 | Go panel renderers: Telegram bots, Telegram user accounts (inline-bot trick), Discord | P2 | L | 006 | `v0.7.0`, `go/v0.7.0` | TODO |
+| 8 | 007 | Go panel renderers: Telegram bots, Telegram user accounts (inline-bot trick), Discord | P2 | L | 006 | `v0.7.0`, `go/v0.7.0` | DONE (see execution notes; one live test of the inline route is the owner's) |
 | 9 | 008 | SPIKE (roadmap): a Go port of the store | P3 | M | 005, 006, 009 | — | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
@@ -432,3 +432,64 @@ each is marked in its plan):
   - **Crate versions** are `0.6.0`, matching the tag.
   - **Skipped locally:** `nix flake check` (CI runs it on the pushed
     commits). Every build ran niced with two jobs.
+- **007 done 2026-10-29** (tags `v0.7.0` and `go/v0.7.0`). `go/render/telegram`
+  (gotd v0.144.0, as wuphf's Telegram connector) and `go/render/discord`
+  (discordgo v0.29.0, the latest release). Adding gotd raised the Go
+  module's `golang.org/x/*` requirements to what wuphf's Telegram connector
+  already uses; grpc and protobuf stay at 1.76.0 and 1.36.11. The Telegram
+  package does not import discordgo. Tests use a recording gotd invoker, a
+  fake Discord API and a scripted settings server; none talk to Telegram or
+  Discord. Dropping the answer-once guard, letting a stranger's inline query
+  get the panel, editing an inline message on the main connection instead of
+  its DC, skipping markdown escaping, or never deferring a slow press each
+  makes a test fail. Deviations:
+  - **`go/settings/settingstest`** is a new scriptable server (`RenderFunc`,
+    `ActFunc`, recorded requests, `Start`) rather than 006's test fake
+    exported as is: the renderers need to script responses, which that fake
+    cannot. 006's own tests keep their fake.
+  - **`BotPanel.Command` takes the command's message id**, so text replies
+    answer the command as the plan asks.
+  - **`BotPanel.HandleService`** (not in the plan) takes the users or chats
+    picked with Telegram's picker, which arrive as a service message, not a
+    `*tg.Message`. Picked chats are sent as Bot API ids (`-100…` for
+    channels and supergroups), the `telegram.chat` domain's form. Options
+    `WithPickers` and `WithPeerResolver` (default: zero access hash, which
+    a bot may use for peers it has met) were added.
+  - **`InlinePanel` takes a `HelperBot` interface** (`API()` and `DC()`),
+    which `*telegram.Client` satisfies, instead of `*telegram.Client`
+    itself, so tests can fake the data centers. A typed nil client counts
+    as no helper bot.
+  - **`HandleInlineQuery` returns `(bool, error)`**: a query that is not a
+    panel token is left to the host (wuphf's sticker plan uses the same
+    helper bot). A stranger's query for a live token gets an empty answer and
+    does not use the token up.
+  - **Where an inline panel's questions are answered.** The bot cannot tell
+    which chat an inline message is in, so a question is answered by the
+    account's next message in the chat the panel was last opened in. One
+    inline panel per account at a time works best.
+  - **A `post` on an inline panel replaces it** instead of posting a new
+    message, for the same reason. Notices after typed answers show above
+    the redrawn panel; refusals show on the panel and keep the question.
+  - **Discord presses are answered directly when they are quick.** Discord
+    lets only the first response to a press open a modal, so the renderer
+    presses first and updates the message (or opens the modal) when the
+    press takes under two seconds; a slower press is acknowledged with a
+    deferred update and the message edited afterwards, as the plan says.
+    A question that comes after a deferral (or after a modal) shows its text
+    with an "✏️ Answer" button that opens the modal. `TestPressDefersThenEdits`
+    covers the slow path and `TestPressUpdatesTheMessage` the quick one.
+  - **The Discord fake has four calls**, not three: `FollowupMessageCreate`
+    carries the ephemeral notices.
+  - **Custom ids `cfg:!q` and `cfg:!p`** belong to the renderer (the modal
+    and its button, the picker select menu); panel tokens never start with
+    `!`.
+  - **The Discord panel has no `Command`**: Discord programs take commands as
+    slash commands, which the host routes.
+  - **Crate versions** are `0.7.0`, matching the tag.
+  - **Not tested here, for the owner:** the inline route against real
+    Telegram (the plan's STOP condition asks for one manual run). With a
+    real helper bot (inline mode on) and a user account: open the panel in a
+    chat, check that the message shows the bot's buttons, press one, and
+    check that the message is edited.
+  - **Skipped locally:** `nix flake check` (CI runs it). Every Go command ran
+    niced with `GOMAXPROCS=2` and `-p=2`.
