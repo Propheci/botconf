@@ -32,6 +32,8 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 7 | 006 | Go module and settings client | P1 | M | 005 | `v0.6.0`, `go/v0.6.0` | DONE (see execution notes) |
 | 8 | 007 | Go panel renderers: Telegram bots, Telegram user accounts (inline-bot trick), Discord | P2 | L | 006 | `v0.7.0`, `go/v0.7.0` | DONE (see execution notes; one live test of the inline route is the owner's) |
 | 9 | 008 | SPIKE (roadmap): a Go port of the store | P3 | M | 005, 006, 009 | — | TODO |
+| 10 | 010 | `reload()` re-reads the config file (`BaseSource`) | P1 | S | 009 | `v0.8.0`, `go/v0.8.0` | TODO |
+| 11 | 011 | Drafts in the settings panel (`required`/`when` fields, `SettingsStore::check`) | P1 | M–L | 004, 005, 009, 010 | `v0.9.0`, `go/v0.9.0` | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -73,6 +75,14 @@ listed.
   and Step 7 gives the assistant bot a migration for its table. wuphf writes
   a sqlx store in its own plans and passes it to the `Panel` it serves
   through 005.
+- **010 and 011 (added 2026-10-29 at `4cf325a`)** come from two gaps wuphf's
+  plan 039 found, and the owner's decisions on them: a reload must re-read
+  the config file (010), and the panel needs drafts so a value that is only
+  valid once several fields are set (a new wuphf rule, a rule switching kind)
+  can be built before it is saved (011). 011 builds on 010's tag. wuphf
+  adopts both in its plan 044 (pin `v0.9.0`); the assistant bot adopts 010 in
+  010's Step 5 and needs nothing from 011. Both plans follow the build limits
+  (niced, 2 jobs, one workspace gate, no local `nix flake check`).
 
 ## Decisions confirmed by the owner on 2026-10-25
 
