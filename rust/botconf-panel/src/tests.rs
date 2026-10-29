@@ -87,7 +87,7 @@ async fn answer(
     ask: AskKind,
     input: Input,
 ) -> Result<Reaction<Toy>, PanelError> {
-    let question = Question { target, ask };
+    let question = Question::new(target, ask);
     panel
         .answer(&question, input, &viewer(&FakeNames, &LIMITS))
         .await
@@ -508,13 +508,7 @@ async fn questions_name_the_setting_and_offer_pickers() {
     let screen = render(&panel, &Page::Setting(admins.clone())).await;
     let reaction = press(&panel, &find(&screen, "➕ Add")).await;
     let ask = reaction.ask.unwrap();
-    assert_eq!(
-        ask.question,
-        Question {
-            target: admins,
-            ask: AskKind::Items
-        }
-    );
+    assert_eq!(ask.question, Question::new(admins, AskKind::Items));
     assert_eq!(
         ask.text.to_plain(),
         "Pick users with the buttons below, or send the ids or @usernames (of people who have \
@@ -783,4 +777,195 @@ async fn closing_and_posting() {
         panel.press("nonsense", &viewer(&FakeNames, &LIMITS)).await,
         Err(PanelError::Rejected(_))
     ));
+}
+
+/// Adds the route `name` from the routes' ➕ Add question: the draft it opens.
+async fn new_route(panel: &Panel<Toy>, name: &str) -> Reaction<Toy> {
+    let routes = target(panel, "routes");
+    answer(panel, routes, AskKind::Entry, typed(name))
+        .await
+        .unwrap()
+}
+
+/// Opens the draft field `field` on `screen` and answers its question with
+/// `text`: the redrawn draft.
+async fn fill_in(panel: &Panel<Toy>, screen: &Screen, field: &str, text: &str) -> Screen {
+    let page = press_screen(panel, &find(screen, &format!("{field}:"))).await;
+    let ask = press(panel, &find(&page, "✏️ Change")).await.ask.unwrap();
+    assert!(ask.question.draft.is_some(), "{:?}", ask.question);
+    panel
+        .answer(&ask.question, typed(text), &viewer(&FakeNames, &LIMITS))
+        .await
+        .unwrap()
+        .screen
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_new_entry_opens_a_draft() {
+    let panel = panel().await;
+    let reaction = new_route(&panel, "r1").await;
+    assert_eq!(reaction.notice.as_deref(), Some(crate::press::FILL_IN));
+    assert!(reaction.change.is_none());
+    let draft = reaction.screen.unwrap();
+    assert!(
+        text(&draft).contains("draft, not saved"),
+        "{}",
+        text(&draft)
+    );
+    assert!(text(&draft).contains("X: ⚠️ needed"), "{}", text(&draft));
+    // `y` only applies to a `b`.
+    assert!(!text(&draft).contains("Y:"), "{}", text(&draft));
+    assert!(!labels(&draft).iter().any(|label| label.contains("Save")));
+    assert_eq!(value(&panel, "routes.r1"), None);
+
+    let draft = fill_in(&panel, &draft, "X", "1").await;
+    assert_eq!(value(&panel, "routes.r1"), None);
+    let saved = press(&panel, &find(&draft, "💾 Save")).await;
+    assert!(saved.change.is_some());
+    assert_eq!(
+        value(&panel, "routes.r1"),
+        Some(json!({"kind": "a", "x": "1"}))
+    );
+    let entry = saved.screen.unwrap();
+    assert!(!text(&entry).contains("draft"), "{}", text(&entry));
+    assert!(text(&entry).contains("routes.r1"), "{}", text(&entry));
+}
+
+#[tokio::test]
+async fn switching_a_kind_opens_a_draft() {
+    let panel = panel().await;
+    let stored = json!({"kind": "a", "x": "1"});
+    panel
+        .store()
+        .set("routes.r2", stored.clone(), None)
+        .await
+        .unwrap();
+    let entry = target(&panel, "routes").entry("r2");
+    let page = render(&panel, &Page::Setting(entry)).await;
+    // A stored `a` does not show `y`.
+    assert!(!labels(&page).iter().any(|label| label.starts_with("Y:")));
+
+    let kind = press_screen(&panel, &find(&page, "Kind:")).await;
+    let reaction = press(&panel, &find(&kind, "⚪ B")).await;
+    let notice = reaction.notice.unwrap();
+    assert!(notice.starts_with("📝 Not saved yet"), "{notice}");
+    assert!(notice.contains("route `r2`"), "{notice}");
+    assert_eq!(value(&panel, "routes.r2"), Some(stored));
+    let draft = reaction.screen.unwrap();
+    // `x` was dropped with the switch; `y` is needed.
+    assert!(text(&draft).contains("Y: ⚠️ needed"), "{}", text(&draft));
+    assert!(!text(&draft).contains("X:"), "{}", text(&draft));
+
+    let draft = fill_in(&panel, &draft, "Y", "2").await;
+    press(&panel, &find(&draft, "💾 Save")).await;
+    assert_eq!(
+        value(&panel, "routes.r2"),
+        Some(json!({"kind": "b", "y": "2"}))
+    );
+}
+
+#[tokio::test]
+async fn cancel_discards_the_draft() {
+    let panel = panel().await;
+    let draft = new_route(&panel, "r1").await.screen.unwrap();
+    let draft = fill_in(&panel, &draft, "X", "1").await;
+    let map = press_screen(&panel, &find(&draft, "✖️ Cancel")).await;
+    assert!(text(&map).contains("No entries yet."), "{}", text(&map));
+    assert_eq!(value(&panel, "routes.r1"), None);
+    assert!(panel.store().current().overrides().is_empty());
+}
+
+#[tokio::test]
+async fn an_invalid_save_is_refused() {
+    let panel = panel().await;
+    let entry = target(&panel, "routes").entry("r1");
+    let token = Action::SaveDraft(entry, json!({"kind": "a"})).encode();
+    match panel.press(&token, &viewer(&FakeNames, &LIMITS)).await {
+        Err(PanelError::Rejected(reason)) => {
+            assert!(reason.contains("route `r1`"), "{reason}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(value(&panel, "routes.r1"), None);
+}
+
+#[tokio::test]
+async fn a_typed_answer_edits_the_draft() {
+    let panel = panel().await;
+    let draft = new_route(&panel, "r1").await.screen.unwrap();
+    let draft = fill_in(&panel, &draft, "X", "hello").await;
+    assert!(text(&draft).contains("X: hello"), "{}", text(&draft));
+    assert!(
+        text(&draft).contains("draft, not saved"),
+        "{}",
+        text(&draft)
+    );
+    assert!(labels(&draft).iter().any(|label| label.contains("Save")));
+    assert_eq!(value(&panel, "routes.r1"), None);
+    assert!(panel.store().current().overrides().is_empty());
+}
+
+#[tokio::test]
+async fn drafts_survive_a_new_panel() {
+    let tokens = Arc::new(MemoryTokenStore::new());
+    let first = panel().await.token_store(Arc::clone(&tokens));
+    // As after a restart: another panel over the same settings and handles.
+    let second = Panel::new(Arc::clone(first.store())).token_store(Arc::clone(&tokens));
+    let limits = Limits {
+        token_bytes: HANDLE_LEN,
+        ..LIMITS
+    };
+    let view = viewer(&FakeNames, &limits);
+
+    let routes = target(&first, "routes");
+    let question = Question::new(routes, AskKind::Entry);
+    let draft = first
+        .answer(&question, typed("r1"), &view)
+        .await
+        .unwrap()
+        .screen
+        .unwrap();
+    let token = find(&draft, "X:");
+    assert!(token.starts_with('~'), "{token}");
+
+    let field = second.press(&token, &view).await.unwrap().screen.unwrap();
+    assert!(text(&field).contains("X"), "{}", text(&field));
+    assert!(
+        text(&field).contains("draft, not saved"),
+        "{}",
+        text(&field)
+    );
+    let back = second
+        .press(&find(&field, "‹ Back"), &view)
+        .await
+        .unwrap()
+        .screen
+        .unwrap();
+    // The same draft, without the notice it opened with.
+    assert!(text(&draft).ends_with(&text(&back)), "{}", text(&back));
+}
+
+#[test]
+fn old_questions_still_parse() {
+    let lamp = Target::setting(3).entry("lamp");
+    assert_eq!(
+        Question::parse("i:3.lamp"),
+        Some(Question::new(lamp, AskKind::Items))
+    );
+    // An entry name may hold a `|`.
+    assert_eq!(
+        Question::parse("v:3.a|b"),
+        Some(Question::new(
+            Target::setting(3).entry("a|b"),
+            AskKind::Value
+        ))
+    );
+
+    let drafted = Question {
+        target: Target::setting(3).entry("r|1").field(1),
+        ask: AskKind::Value,
+        draft: Some(json!({"kind": "a|%7C", "x": "1:2"})),
+    };
+    assert_eq!(Question::parse(&drafted.encode()), Some(drafted));
 }

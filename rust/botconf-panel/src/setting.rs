@@ -73,16 +73,25 @@ impl<'a> Setting<'a> {
     }
 
     /// The edit setting the value to `value` (clearing it for `None`). For a
-    /// field, the form is rewritten, without the fields of its group.
+    /// field, the form is rewritten (see [`Self::set_in`]).
     pub fn set<S: Schema>(&self, snapshot: &Snapshot<S>, value: Option<Value>) -> Edit {
         let key = self.key();
-        let Some(field) = self.field else {
+        if self.field.is_none() {
             return Edit::Set(key, value.unwrap_or(Value::Null));
-        };
-
-        let mut form = match snapshot.value(&key) {
+        }
+        let form = match snapshot.value(&key) {
             Some(Value::Object(form)) => form,
             _ => Map::new(),
+        };
+        Edit::Set(key, Value::Object(self.set_in(form, value)))
+    }
+
+    /// `form` with this field set to `value` (removed for `None`): setting a
+    /// field clears the other fields of its group, and the fields whose
+    /// condition no longer holds are dropped.
+    pub fn set_in(&self, mut form: Map<String, Value>, value: Option<Value>) -> Map<String, Value> {
+        let Some(field) = self.field else {
+            return form;
         };
         match value {
             Some(value) => {
@@ -101,7 +110,19 @@ impl<'a> Setting<'a> {
                 form.remove(&*field.key);
             }
         }
-        Edit::Set(key, Value::Object(form))
+        if let Kind::Form(kind) = self.form_kind() {
+            kind.drop_inapplicable(&mut form);
+        }
+        form
+    }
+
+    /// The field's value in the form value `form`, if set.
+    pub fn value_in(&self, form: &Value) -> Option<Value> {
+        let value = match self.field {
+            Some(field) => form.get(&*field.key)?.clone(),
+            None => form.clone(),
+        };
+        (!value.is_null()).then_some(value)
     }
 
     /// The edit adding `items` to the list (and removing `removed`).

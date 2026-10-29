@@ -17,6 +17,9 @@ const GONE: &str = "This setting no longer exists";
 const NO_CHOICE: &str = "This choice no longer exists";
 const LIST_CHANGED: &str = "This list changed";
 const OUT_OF_DATE: &str = "This panel is out of date";
+const NOT_IN_DRAFT: &str = "This button does not work on a draft";
+/// Shown when a new entry opens a draft.
+pub(crate) const FILL_IN: &str = "📝 Fill in the fields, then 💾 Save";
 
 /// Why a button can't do what it says.
 enum Problem {
@@ -62,21 +65,18 @@ impl<S: Schema> Panel<S> {
                 post: Some(self.render(&page, viewer).await),
                 ..Reaction::none()
             }),
-            Action::Ask(target, ask) => {
+            Action::Ask(target, ask) => self.ask(Question::new(target, ask), viewer).await,
+            Action::InDraft { value, then } => self.press_in_draft(value, *then, viewer).await,
+            Action::SaveDraft(target, value) => {
                 let catalog = self.store.catalog();
-                let question = Question { target, ask };
-                let Some(setting) = Setting::resolve(&catalog, &question.target) else {
-                    return Err(PanelError::Rejected(GONE.into()));
-                };
-                let snapshot = self.store.current();
-                Ok(Reaction {
-                    ask: Some(
-                        self.question(&snapshot, &setting, question.clone(), viewer)
-                            .await,
-                    ),
-                    notice: Some("✏️ Waiting for your answer".into()),
-                    ..Reaction::none()
+                let setting = Setting::resolve(&catalog, &target)
+                    .filter(|setting| setting.field.is_none())
+                    .ok_or_else(|| PanelError::Rejected(GONE.into()))?;
+                let edit = Edit::Set(setting.key(), value);
+                self.apply(edit, &Page::Setting(target), viewer, |error| {
+                    format!("❌ {error}")
                 })
+                .await
             }
             action => {
                 let (edit, page) = match self.edit_for(action) {
@@ -91,10 +91,201 @@ impl<S: Schema> Panel<S> {
                         });
                     }
                 };
+                if let Some(draft) = self.draft_instead(&edit, &page, viewer).await {
+                    return Ok(draft);
+                }
                 self.apply(edit, &page, viewer, |error| format!("❌ {error}"))
                     .await
             }
         }
+    }
+
+    /// Asks `question`.
+    async fn ask(
+        &self,
+        question: Question,
+        viewer: &Viewer<'_>,
+    ) -> Result<Reaction<S>, PanelError> {
+        let catalog = self.store.catalog();
+        let Some(setting) = Setting::resolve(&catalog, &question.target) else {
+            return Err(PanelError::Rejected(GONE.into()));
+        };
+        let snapshot = self.store.current();
+        Ok(Reaction {
+            ask: Some(
+                self.question(&snapshot, &setting, question.clone(), viewer)
+                    .await,
+            ),
+            notice: Some("✏️ Waiting for your answer".into()),
+            ..Reaction::none()
+        })
+    }
+
+    /// A button of a draft's page was pressed: it changes the draft `value`.
+    async fn press_in_draft(
+        &self,
+        value: Value,
+        then: Action,
+        viewer: &Viewer<'_>,
+    ) -> Result<Reaction<S>, PanelError> {
+        match then {
+            Action::Open(page, part) => {
+                let field = matches!(&page, Page::Setting(target) if target.field.is_some());
+                let draft = field.then_some(&value);
+                Ok(Reaction::screen(
+                    self.render_in(&page, draft, part, None, viewer).await,
+                ))
+            }
+            Action::Ask(target, ask) => {
+                let question = Question {
+                    target,
+                    ask,
+                    draft: Some(value),
+                };
+                self.ask(question, viewer).await
+            }
+            action => match self.draft_edit(&value, action) {
+                Ok((form, draft)) => Ok(Reaction::screen(
+                    self.render(&Page::Draft(form, draft), viewer).await,
+                )),
+                Err((Problem::Rejected(problem), _)) => Err(PanelError::Rejected(problem.into())),
+                Err((Problem::Stale(notice, _), form)) => Err(PanelError::Stale {
+                    notice: notice.into(),
+                    screen: match form {
+                        Some(form) => self.render(&Page::Draft(form, value), viewer).await,
+                        None => self.render(&Page::Home, viewer).await,
+                    },
+                }),
+            },
+        }
+    }
+
+    /// The draft that a field button pressed on the draft `value` makes: the
+    /// form's target and its new value. On a problem, the form's target, if
+    /// known, to redraw.
+    fn draft_edit(
+        &self,
+        value: &Value,
+        action: Action,
+    ) -> Result<(Target, Value), (Problem, Option<Target>)> {
+        let snapshot = self.store.current();
+        let catalog = self.store.catalog();
+        let target = match &action {
+            Action::Toggle(target, _)
+            | Action::ToggleValue(target, _)
+            | Action::Pick(target, _)
+            | Action::PickValue(target, _)
+            | Action::Add(target, _)
+            | Action::Remove(target, _)
+            | Action::Clear(target) => target.clone(),
+            _ => return Err((Problem::Rejected(NOT_IN_DRAFT), None)),
+        };
+        let setting = Setting::resolve(&catalog, &target)
+            .filter(|setting| setting.field.is_some())
+            .ok_or((Problem::Rejected(GONE), None))?;
+        let form = target.parent().ok_or((Problem::Rejected(GONE), None))?;
+        let fail = |problem| (problem, Some(form.clone()));
+        let changed = || fail(Problem::Stale(LIST_CHANGED, Page::Setting(target.clone())));
+        let current = setting.value_in(value);
+        let nth = |choice: usize| {
+            setting
+                .kind
+                .choices(snapshot.as_ref())
+                .into_iter()
+                .nth(choice)
+                .ok_or_else(|| fail(Problem::Rejected(NO_CHOICE)))
+        };
+
+        let field = match action {
+            Action::Toggle(_, choice) => {
+                if !has_fixed_choices(setting.kind) {
+                    return Err(changed());
+                }
+                Some(toggled(current, Value::String(nth(choice)?.value)))
+            }
+            Action::ToggleValue(_, item) => {
+                if !is_choice(&setting, &snapshot, &item) {
+                    return Err(changed());
+                }
+                Some(toggled(current, item))
+            }
+            Action::Pick(_, choice) => {
+                if !has_fixed_choices(setting.kind) {
+                    return Err(changed());
+                }
+                Some(setting.kind.choice_value(&nth(choice)?.value))
+            }
+            Action::PickValue(_, picked) => {
+                if !is_choice(&setting, &snapshot, &picked) {
+                    return Err(changed());
+                }
+                let Value::String(picked) = picked else {
+                    return Err(changed());
+                };
+                Some(setting.kind.choice_value(&picked))
+            }
+            Action::Add(_, item) => {
+                let mut items = list_of(current);
+                if !items.contains(&item) {
+                    items.push(item);
+                }
+                Some(Value::Array(items))
+            }
+            Action::Remove(_, item) => {
+                let mut items = list_of(current);
+                if !items.contains(&item) {
+                    return Err(changed());
+                }
+                items.retain(|existing| existing != &item);
+                Some(Value::Array(items))
+            }
+            Action::Clear(_) => None,
+            _ => unreachable!("matched above"),
+        };
+        let object = value.as_object().cloned().unwrap_or_default();
+        Ok((form, Value::Object(setting.set_in(object, field))))
+    }
+
+    /// A draft to show instead of applying `edit`, when `edit` sets a form
+    /// (one of its fields, or a new map entry) to a value the store would
+    /// refuse: the user then completes it field by field.
+    pub(crate) async fn draft_instead(
+        &self,
+        edit: &Edit,
+        page: &Page,
+        viewer: &Viewer<'_>,
+    ) -> Option<Reaction<S>> {
+        let (Edit::Set(key, value), Page::Setting(target)) = (edit, page) else {
+            return None;
+        };
+        let catalog = self.store.catalog();
+        let form = match target.field {
+            Some(_) => target.parent()?,
+            None => target.clone(),
+        };
+        let setting = Setting::resolve(&catalog, &form)?;
+        if setting.field.is_some() || !matches!(setting.kind, Kind::Form(_)) {
+            return None;
+        }
+        let reason = match self.store.check(key, value.clone()).await {
+            Err(SettingsError::InvalidValue { reason, .. }) => reason,
+            _ => return None,
+        };
+        let is_new = self
+            .store
+            .current()
+            .value(key)
+            .is_none_or(|value| value.is_null());
+        let notice = if is_new {
+            FILL_IN.to_string()
+        } else {
+            format!("📝 Not saved yet: {reason}")
+        };
+        let page = Page::Draft(form, value.clone());
+        Some(Reaction {
+            notice: Some(notice.clone()),
+            ..Reaction::screen(self.render_part(&page, 0, Some(&notice), viewer).await)
+        })
     }
 
     /// The user answered `question`.
@@ -111,6 +302,26 @@ impl<S: Schema> Panel<S> {
                 screen: self.render(&Page::Home, viewer).await,
             });
         };
+        if let Some(draft) = &question.draft {
+            // An answer on a draft changes the draft.
+            let Some(form) = question.target.parent().filter(|_| setting.field.is_some()) else {
+                return Err(PanelError::Rejected(NOT_IN_DRAFT.into()));
+            };
+            if input == Input::Cancel {
+                return Ok(Reaction {
+                    notice: Some("Cancelled".into()),
+                    ..Reaction::screen(self.render(&Page::Draft(form, draft.clone()), viewer).await)
+                });
+            }
+            let draft = self
+                .read_into_draft(&setting, question, draft, input, viewer)
+                .await
+                .map_err(PanelError::Rejected)?;
+            return Ok(Reaction::screen(
+                self.render(&Page::Draft(form, draft), viewer).await,
+            ));
+        }
+
         let page = Page::Setting(question.target.clone());
         if input == Input::Cancel {
             return Ok(Reaction {
@@ -125,6 +336,9 @@ impl<S: Schema> Panel<S> {
             .await
         {
             Ok((edit, page)) => {
+                if let Some(draft) = self.draft_instead(&edit, &page, viewer).await {
+                    return Ok(draft);
+                }
                 self.apply(edit, &page, viewer, |error| error.to_string())
                     .await
             }
@@ -251,9 +465,12 @@ impl<S: Schema> Panel<S> {
                 let parent = target.parent().ok_or(Problem::Rejected(GONE))?;
                 return Ok((Edit::DeleteEntry(key), Page::Setting(parent)));
             }
-            Action::Open(..) | Action::Post(_) | Action::Ask(..) | Action::Close => {
-                unreachable!("handled by press")
-            }
+            Action::Open(..)
+            | Action::Post(_)
+            | Action::Ask(..)
+            | Action::Close
+            | Action::InDraft { .. }
+            | Action::SaveDraft(..) => unreachable!("handled by press"),
         };
         Ok((edit, Page::Setting(target)))
     }
@@ -325,4 +542,23 @@ fn pick<S: Schema>(
         setting.set(snapshot, Some(picked)),
         Page::Setting(target.clone()),
     ))
+}
+
+/// The items of a list value.
+fn list_of(value: Option<Value>) -> Vec<Value> {
+    match value {
+        Some(Value::Array(items)) => items,
+        _ => Vec::new(),
+    }
+}
+
+/// The list `value` with `item` added, or removed if it is there.
+fn toggled(value: Option<Value>, item: Value) -> Value {
+    let mut items = list_of(value);
+    if items.contains(&item) {
+        items.retain(|existing| existing != &item);
+    } else {
+        items.push(item);
+    }
+    Value::Array(items)
 }

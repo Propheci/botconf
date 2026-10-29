@@ -200,19 +200,49 @@ pub struct Picker {
 pub struct Question {
     pub target: Target,
     pub ask: AskKind,
+    /// The draft the answer goes into (see [`Page::Draft`]), when the
+    /// question was asked on one; `None` for the stored settings.
+    pub draft: Option<Value>,
 }
 
 impl Question {
-    /// A compact form, e.g. for a client that keeps it as text.
+    /// A question about the stored settings.
+    pub fn new(target: Target, ask: AskKind) -> Self {
+        Self {
+            target,
+            ask,
+            draft: None,
+        }
+    }
+
+    /// A compact form, e.g. for a client that keeps it as text:
+    /// `<ask>:<target>`, then `|<draft>` with `%` and `|` escaped.
     pub fn encode(&self) -> String {
-        format!("{}:{}", self.ask.code(), self.target.encode())
+        let mut text = format!("{}:{}", self.ask.code(), self.target.encode());
+        if let Some(draft) = &self.draft {
+            text.push('|');
+            text.push_str(&draft.to_string().replace('%', "%25").replace('|', "%7C"));
+        }
+        text
     }
 
     pub fn parse(text: &str) -> Option<Self> {
+        // Questions encoded before drafts existed have no `|<draft>`; an entry
+        // name may hold a `|`, so the text is read whole when what follows
+        // the last `|` is not a draft.
+        let draft = text.rsplit_once('|').and_then(|(question, draft)| {
+            let draft = draft.replace("%7C", "|").replace("%25", "%");
+            Some((question, serde_json::from_str::<Value>(&draft).ok()?))
+        });
+        let (text, draft) = match draft {
+            Some((question, draft)) => (question, Some(draft)),
+            None => (text, None),
+        };
         let (ask, target) = text.split_once(':')?;
         Some(Self {
             target: Target::parse(target)?,
             ask: AskKind::parse(ask)?,
+            draft,
         })
     }
 }

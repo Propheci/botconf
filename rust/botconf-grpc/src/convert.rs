@@ -753,10 +753,7 @@ mod tests {
         assert_eq!(spans[1].text, "\nhi");
         assert_eq!(wire.rows[0].buttons[0].token, "a:1:v");
 
-        let question = Question {
-            target: Target::setting(1),
-            ask: AskKind::Value,
-        };
+        let question = Question::new(Target::setting(1), AskKind::Value);
         let asked = ask(&Ask {
             question: question.clone(),
             title: "Greeting".into(),

@@ -8,7 +8,7 @@ use botconf::{Kind, Schema, Snapshot, keys::is_entry_name, parse_value};
 use crate::{
     Ask, Domain, Input, Panel, Picker, Question, Viewer,
     edit::Edit,
-    screens::{btn, list, plain},
+    screens::{btn, in_draft, list, plain},
     setting::Setting,
     text::{Span, Text},
     token::{Action, AskKind, Page},
@@ -38,7 +38,11 @@ impl<S: Schema> Panel<S> {
         viewer: &Viewer<'_>,
     ) -> Ask {
         let title = setting.title();
-        let current = setting.value(snapshot).map(|value| plain(&value));
+        let current = match &question.draft {
+            Some(draft) => setting.value_in(draft),
+            None => setting.value(snapshot),
+        }
+        .map(|value| plain(&value));
         let now = |text: &mut Text| {
             if let Some(value) = &current {
                 text.push_plain("\n\nNow (tap to copy): ")
@@ -154,7 +158,13 @@ impl<S: Schema> Panel<S> {
             .max_rows
             .unwrap_or(MAX_CANDIDATES)
             .clamp(1, MAX_CANDIDATES);
-        let listed = list(setting.value(snapshot).as_ref());
+        let listed = list(
+            match &question.draft {
+                Some(draft) => setting.value_in(draft),
+                None => setting.value(snapshot),
+            }
+            .as_ref(),
+        );
         let rows: Vec<_> = names
             .candidates(domain, "", limit + listed.len())
             .await
@@ -162,10 +172,12 @@ impl<S: Schema> Panel<S> {
             .filter(|(id, _)| !listed.contains(id))
             .take(limit)
             .map(|(id, name)| {
-                vec![btn(
-                    format!("➕ {}", name.short),
-                    Action::Add(question.target.clone(), id),
-                )]
+                let add = Action::Add(question.target.clone(), id);
+                let action = match &question.draft {
+                    Some(draft) => in_draft(draft, add),
+                    None => add,
+                };
+                vec![btn(format!("➕ {}", name.short), action)]
             })
             .collect();
         self.issue_rows(rows, viewer.limits).await
@@ -221,6 +233,33 @@ impl<S: Schema> Panel<S> {
             }
         };
         Ok(answer)
+    }
+
+    /// The draft `draft` with the answer to `question` (about one of its
+    /// fields) in it. The error says why the answer makes no sense.
+    pub(crate) async fn read_into_draft(
+        &self,
+        setting: &Setting<'_>,
+        question: &Question,
+        draft: &Value,
+        input: Input,
+        viewer: &Viewer<'_>,
+    ) -> Result<Value, String> {
+        let field = match question.ask {
+            AskKind::Value => self.value(setting.kind, input, viewer).await?,
+            AskKind::Items => {
+                let mut items = list(setting.value_in(draft).as_ref());
+                for item in self.items(setting.kind, input, viewer).await? {
+                    if !items.contains(&item) {
+                        items.push(item);
+                    }
+                }
+                Value::Array(items)
+            }
+            AskKind::Entry => return Err("a draft's field has no entries".into()),
+        };
+        let form = draft.as_object().cloned().unwrap_or_default();
+        Ok(Value::Object(setting.set_in(form, Some(field))))
     }
 
     /// A whole value.

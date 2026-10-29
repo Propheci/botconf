@@ -118,10 +118,7 @@ mod tests {
 
     fn ask(picker: Option<Picker>) -> Ask {
         Ask {
-            question: Question {
-                target: Target::setting(1),
-                ask: AskKind::Items,
-            },
+            question: Question::new(Target::setting(1), AskKind::Items),
             title: "Admins".into(),
             text: Text::plain("Send the ids."),
             picker,

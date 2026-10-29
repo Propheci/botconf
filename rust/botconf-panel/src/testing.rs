@@ -89,6 +89,10 @@ pub struct Config {
     pub notes: BTreeMap<String, String>,
     #[serde(default)]
     pub features: BTreeMap<String, Value>,
+    /// Routes, each either an `a` (with `x`) or a `b` (with `y`); see
+    /// `derive`.
+    #[serde(default)]
+    pub routes: BTreeMap<String, Value>,
 }
 
 fn info() -> String {
@@ -154,6 +158,27 @@ const PRESET: &Kind = &Kind::form(PRESET_FORM);
 const ADMINS: &Kind = &Kind::reference(USER, true);
 const NOTE: &Kind = &Kind::text(false);
 
+const ROUTE_KINDS: &[FixedChoice] = &[FixedChoice::new("a", "A"), FixedChoice::new("b", "B")];
+
+/// A route needs `x` when it is an `a`, and `y` when it is a `b`: no single
+/// field edit turns one into the other, and a new route is incomplete.
+const ROUTE_FIELDS: &[Field] = &[
+    Field::new(
+        "kind",
+        "Kind",
+        Kind::one_of(Choices::fixed(ROUTE_KINDS), false, false),
+    )
+    .required(),
+    Field::new("x", "X", Kind::text(true))
+        .required()
+        .when("kind", "a"),
+    Field::new("y", "Y", Kind::text(true))
+        .required()
+        .when("kind", "b"),
+];
+const ROUTE_FORM: &Form = &Form::new(ROUTE_FIELDS, r#"{"kind": "a"}"#);
+const ROUTE: &Kind = &Kind::form(ROUTE_FORM);
+
 fn colors(_: &dyn View) -> Vec<Choice> {
     vec![Choice::new("red", "🔴 red"), Choice::new("blue", "🔵 blue")]
 }
@@ -179,7 +204,18 @@ impl Schema for Toy {
     type Config = Config;
     type Derived = ();
 
-    fn derive(&self, _config: &Config) -> Result<(), String> {
+    fn derive(&self, config: &Config) -> Result<(), String> {
+        for (name, route) in &config.routes {
+            let field = |key: &str| route.get(key).and_then(Value::as_str);
+            let valid = match field("kind") {
+                Some("a") => field("x").is_some() && route.get("y").is_none(),
+                Some("b") => field("y").is_some() && route.get("x").is_none(),
+                _ => false,
+            };
+            if !valid {
+                return Err(format!("route `{name}` needs x as an a, or y as a b"));
+            }
+        }
         Ok(())
     }
 
@@ -209,6 +245,7 @@ impl Schema for Toy {
             )),
             RuntimeSetting::new("rooms", "Rooms to watch").kind(Kind::reference("toy.room", true)),
             RuntimeSetting::per_entry("notes", "Notes by topic", NOTE),
+            RuntimeSetting::per_entry("routes", "Where things go", ROUTE),
         ]
     }
 

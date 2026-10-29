@@ -103,6 +103,9 @@ pub enum Page {
     /// The settings of a section, by id.
     Section(String),
     Setting(Target),
+    /// An unsaved value of a form (a setting or a map entry), being filled
+    /// in: nothing is stored until it is saved.
+    Draft(Target, Value),
 }
 
 impl Page {
@@ -111,6 +114,10 @@ impl Page {
             Self::Home => "h".into(),
             Self::Section(id) => format!("m:{}", escape(id)),
             Self::Setting(target) => format!("s:{}", target.encode()),
+            // Escaped, so that the JSON holds no separator (`:`, `@`).
+            Self::Draft(target, value) => {
+                format!("d:{}:{}", target.encode(), escape(&value.to_string()))
+            }
         }
     }
 
@@ -119,6 +126,13 @@ impl Page {
             ("h", None) => Some(Self::Home),
             ("m", Some(id)) if !id.is_empty() => Some(Self::Section(unescape(id))),
             ("s", Some(target)) => Some(Self::Setting(Target::parse(target)?)),
+            ("d", Some(draft)) => {
+                let (target, value) = draft.split_once(':')?;
+                Some(Self::Draft(
+                    Target::parse(target)?,
+                    serde_json::from_str(&unescape(value)).ok()?,
+                ))
+            }
             _ => None,
         }
     }
@@ -189,6 +203,14 @@ pub enum Action {
     Delete(Target),
     Reload,
     Close,
+    /// `then`, pressed on a draft holding `value` (see [`Page::Draft`]): it
+    /// changes the draft, not the stored settings.
+    InDraft {
+        value: Value,
+        then: Box<Action>,
+    },
+    /// Stores the draft `value` of the form at the target.
+    SaveDraft(Target, Value),
 }
 
 impl Action {
@@ -218,6 +240,12 @@ impl Action {
             Self::Delete(to) => target("d", to),
             Self::Reload => "R".to_string(),
             Self::Close => "x".to_string(),
+            // The draft is escaped, so that it holds no `:` and the rest is
+            // the pressed action's own encoding.
+            Self::InDraft { value, then } => {
+                format!("D:{}:{}", escape(&value.to_string()), then.encode())
+            }
+            Self::SaveDraft(to, draft) => value("S", to, draft),
         }
     }
 
@@ -253,6 +281,11 @@ impl Action {
             ("c", None) => Self::Clear(target()?),
             ("u", None) => Self::Reset(target()?),
             ("d", None) => Self::Delete(target()?),
+            ("D", Some(then)) => Self::InDraft {
+                value: serde_json::from_str(&unescape(second?)).ok()?,
+                then: Box::new(Self::parse(then)?),
+            },
+            ("S", Some(draft)) => Self::SaveDraft(target()?, serde_json::from_str(draft).ok()?),
             ("R", None) if second.is_none() => Self::Reload,
             ("x", None) if second.is_none() => Self::Close,
             _ => return None,
@@ -364,6 +397,18 @@ mod tests {
             Action::Delete(setting.entry("a:b#c@d%e")),
             Action::Reload,
             Action::Close,
+            Action::open(Page::Draft(entry.clone(), json!({"kind": "a:b@c", "n": 1}))),
+            Action::Open(Page::Draft(setting.clone(), json!({"x": "%3A"})), 2),
+            Action::Post(Page::Draft(entry.clone(), json!({}))),
+            Action::InDraft {
+                value: json!({"kind": "a", "x": "1:2@3"}),
+                then: Box::new(Action::Pick(field.clone(), 1)),
+            },
+            Action::InDraft {
+                value: json!({}),
+                then: Box::new(Action::open(Page::Setting(field.clone()))),
+            },
+            Action::SaveDraft(entry.clone(), json!({"kind": "b", "y": "a:b"})),
         ] {
             let token = action.encode();
             assert_eq!(Action::parse(&token), Some(action), "{token}");

@@ -32,7 +32,7 @@ pub(crate) fn btn(label: impl Into<String>, action: Action) -> Btn {
 
 /// A screen before its buttons get their tokens: content rows, then one row
 /// of the screen's own navigation (kept on every part of a long screen).
-pub(crate) struct Draft {
+pub(crate) struct Building {
     pub(crate) text: Text,
     pub(crate) rows: Vec<Vec<Btn>>,
     pub(crate) nav: Vec<Btn>,
@@ -52,37 +52,77 @@ impl<S: Schema> Panel<S> {
         notice: Option<&str>,
         viewer: &Viewer<'_>,
     ) -> Screen {
+        self.render_in(page, None, part, notice, viewer).await
+    }
+
+    /// Renders a part of `page`, below `notice`. With `draft`, `page` is the
+    /// page of a field of that draft: it shows the draft's value, and its
+    /// buttons change the draft instead of the stored settings.
+    pub(crate) async fn render_in(
+        &self,
+        page: &Page,
+        draft: Option<&Value>,
+        part: usize,
+        notice: Option<&str>,
+        viewer: &Viewer<'_>,
+    ) -> Screen {
         let snapshot = self.store.current();
         let catalog = self.store.catalog();
-        let mut draft = match page {
+        let gone = async || {
+            let mut home = self.home(&snapshot, &catalog).await;
+            home.text = home.text.with_notice("This setting no longer exists.");
+            home
+        };
+        let mut building = match page {
             Page::Home => self.home(&snapshot, &catalog).await,
             Page::Section(id) => self.section(&snapshot, &catalog, id).await,
             Page::Setting(target) => match Setting::resolve(&catalog, target) {
-                Some(setting) => {
-                    self.setting(&snapshot, &catalog, target, setting, viewer)
+                Some(setting) if draft.is_none() || setting.field.is_some() => {
+                    self.setting(&snapshot, &catalog, target, setting, draft, viewer)
                         .await
                 }
-                None => {
-                    let mut home = self.home(&snapshot, &catalog).await;
-                    home.text = home.text.with_notice("This setting no longer exists.");
-                    home
+                _ => gone().await,
+            },
+            Page::Draft(target, value) => match Setting::resolve(&catalog, target) {
+                Some(setting)
+                    if setting.field.is_none() && matches!(setting.kind, Kind::Form(_)) =>
+                {
+                    self.draft(&snapshot, &catalog, target, setting, value)
+                        .await
                 }
+                _ => gone().await,
             },
         };
         if let Some(notice) = notice {
-            draft.text = draft.text.with_notice(notice);
+            building.text = building.text.with_notice(notice);
         }
-        self.finish(draft, page, part, viewer.limits).await
+        self.finish(building, page, part, viewer.limits, draft)
+            .await
     }
 
     /// Cuts a long screen into parts, splits long rows, and gives every
-    /// button its token.
-    async fn finish(&self, draft: Draft, page: &Page, part: usize, limits: &Limits) -> Screen {
-        let rows = paged(draft.rows, draft.nav, limits, part, |part| {
+    /// button its token. With `draft`, every button that is not already a
+    /// draft's page acts on that draft.
+    async fn finish(
+        &self,
+        building: Building,
+        page: &Page,
+        part: usize,
+        limits: &Limits,
+        draft: Option<&Value>,
+    ) -> Screen {
+        let mut rows = paged(building.rows, building.nav, limits, part, |part| {
             Action::Open(page.clone(), part)
         });
+        if let Some(draft) = draft {
+            for button in rows.iter_mut().flatten() {
+                if !matches!(button.action, Action::Open(Page::Draft(..), _)) {
+                    button.action = in_draft(draft, button.action.clone());
+                }
+            }
+        }
         Screen {
-            text: draft.text,
+            text: building.text,
             rows: self.issue_rows(rows, limits).await,
         }
     }
@@ -117,7 +157,7 @@ impl<S: Schema> Panel<S> {
         issued
     }
 
-    async fn home(&self, snapshot: &Snapshot<S>, catalog: &Catalog) -> Draft {
+    async fn home(&self, snapshot: &Snapshot<S>, catalog: &Catalog) -> Building {
         let mut text = Text::plain("⚙️ ");
         text.push(Span::bold("Settings")).push_plain(
             "\nTap a setting to change it. ✏️ marks the ones changed from here, which take \
@@ -155,7 +195,7 @@ impl<S: Schema> Panel<S> {
             .collect();
         rows.extend(buttons.chunks(2).map(<[_]>::to_vec));
 
-        Draft {
+        Building {
             text,
             rows,
             nav: vec![
@@ -165,7 +205,7 @@ impl<S: Schema> Panel<S> {
         }
     }
 
-    async fn section(&self, snapshot: &Snapshot<S>, catalog: &Catalog, id: &str) -> Draft {
+    async fn section(&self, snapshot: &Snapshot<S>, catalog: &Catalog, id: &str) -> Building {
         let described = match self
             .store
             .sections()
@@ -193,7 +233,7 @@ impl<S: Schema> Panel<S> {
             text.push_plain(format!("\n\nNote: {note}."));
         }
 
-        Draft {
+        Building {
             text,
             rows: self.setting_rows(snapshot, catalog, Some(id)),
             nav: vec![btn("‹ Back", Action::open(Page::Home))],
@@ -230,14 +270,21 @@ impl<S: Schema> Panel<S> {
         catalog: &Catalog,
         target: &Target,
         setting: Setting<'_>,
+        draft: Option<&Value>,
         viewer: &Viewer<'_>,
-    ) -> Draft {
+    ) -> Building {
         let key = setting.key();
-        let value = setting.value(snapshot);
+        let value = match draft {
+            Some(draft) => setting.value_in(draft),
+            None => setting.value(snapshot),
+        };
 
         let mut text = Text::new();
-        text.push(Span::bold(setting.title()))
-            .push_plain("\n")
+        text.push(Span::bold(setting.title()));
+        if draft.is_some() {
+            text.push_plain(format!(" · {DRAFT_MARK}"));
+        }
+        text.push_plain("\n")
             .push(Span::italic(&*setting.setting.description));
         if setting.field.is_none() {
             let source = match snapshot.source(&key) {
@@ -416,8 +463,13 @@ impl<S: Schema> Panel<S> {
             }
 
             Kind::Form(form) => {
+                let empty = Map::new();
+                let object = value.as_ref().and_then(Value::as_object).unwrap_or(&empty);
                 let mut lines = Text::new();
                 for (position, field) in form.fields.iter().enumerate() {
+                    if !field.applies(object) {
+                        continue;
+                    }
                     let field_target = target.field(position);
                     let Some(field_setting) = Setting::resolve(catalog, &field_target) else {
                         continue;
@@ -522,24 +574,141 @@ impl<S: Schema> Panel<S> {
             }
         }
 
-        let back = match (target.parent(), &setting.setting.section) {
-            (Some(parent), _) => Page::Setting(parent),
-            (None, Some(section)) => Page::Section(section.to_string()),
-            (None, None) => Page::Home,
+        let back = match (draft, target.parent()) {
+            (Some(draft), Some(form)) => Page::Draft(form, draft.clone()),
+            (_, parent) => back_from(parent, &setting),
         };
-        Draft {
+        Building {
             text,
             rows,
             nav: vec![btn("‹ Back", Action::open(back))],
         }
     }
 
+    /// The page of a draft: its fields, which change the draft, and 💾 Save
+    /// once the draft is complete and the store would accept it.
+    async fn draft(
+        &self,
+        snapshot: &Snapshot<S>,
+        catalog: &Catalog,
+        target: &Target,
+        setting: Setting<'_>,
+        value: &Value,
+    ) -> Building {
+        let Kind::Form(form) = setting.kind else {
+            unreachable!("only forms have drafts");
+        };
+        let empty = Map::new();
+        let object = value.as_object().unwrap_or(&empty);
+        let missing: Vec<_> = form
+            .missing(object)
+            .into_iter()
+            .map(|field| field.key.clone())
+            .collect();
+
+        let mut text = Text::new();
+        text.push(Span::bold(setting.title()))
+            .push_plain(format!(" · {DRAFT_MARK}\n"))
+            .push(Span::italic(&*setting.setting.description))
+            .push_plain("\n\n");
+
+        let mut rows = Vec::new();
+        let mut lines = Text::new();
+        for (position, field) in form.fields.iter().enumerate() {
+            if !field.applies(object) {
+                continue;
+            }
+            let field_target = target.field(position);
+            let Some(field_setting) = Setting::resolve(catalog, &field_target) else {
+                continue;
+            };
+            let summary = match field_setting.value_in(value) {
+                Some(field_value) => {
+                    self.summary_value(snapshot, &field_setting, Some(field_value))
+                }
+                None if missing.contains(&field.key) => "⚠️ needed".to_string(),
+                None => "—".to_string(),
+            };
+            if !lines.0.is_empty() {
+                lines.push_plain("\n");
+            }
+            lines
+                .push_plain("• ")
+                .push(Span::bold(&*field.title))
+                .push_plain(format!(": {summary}"));
+            rows.push(vec![btn(
+                format!("{}: {summary} ›", field.title),
+                in_draft(value, Action::open(Page::Setting(field_target))),
+            )]);
+        }
+        text.append(lines);
+
+        if missing.is_empty() {
+            match self.store.check(&setting.key(), value.clone()).await {
+                Ok(()) => rows.push(vec![btn(
+                    "💾 Save",
+                    Action::SaveDraft(target.clone(), value.clone()),
+                )]),
+                Err(error) => {
+                    text.push_plain(format!("\n\n❌ {error}"));
+                }
+            }
+        } else {
+            text.push_plain("\n\nFill in the fields marked ⚠️, then 💾 Save.");
+        }
+
+        // Cancel goes back to the stored value, or to the map for a new
+        // entry.
+        let stored = setting.value(snapshot).is_some();
+        let cancel = if stored {
+            Page::Setting(target.clone())
+        } else {
+            back_from(target.parent(), &setting)
+        };
+        Building {
+            text,
+            rows,
+            nav: vec![btn("✖️ Cancel", Action::open(cancel))],
+        }
+    }
+
     /// A short description of the value, for buttons.
     pub(crate) fn summary(&self, snapshot: &Snapshot<S>, setting: &Setting<'_>) -> String {
-        summary(snapshot, setting, |domain| {
+        self.summary_value(snapshot, setting, setting.value(snapshot))
+    }
+
+    /// A short description of `value`, a value of `setting`.
+    pub(crate) fn summary_value(
+        &self,
+        snapshot: &Snapshot<S>,
+        setting: &Setting<'_>,
+        value: Option<Value>,
+    ) -> String {
+        summary(snapshot, setting.kind, value, |domain| {
             self.domain_of(domain)
                 .map_or(("item", "items"), |domain| domain.noun)
         })
+    }
+}
+
+/// Marks a draft in its title.
+const DRAFT_MARK: &str = "📝 draft, not saved";
+
+/// `action`, pressed on the draft `value`.
+pub(crate) fn in_draft(value: &Value, action: Action) -> Action {
+    Action::InDraft {
+        value: value.clone(),
+        then: Box::new(action),
+    }
+}
+
+/// Where ‹ Back leads from `setting`: the form or the map holding it
+/// (`parent`), else its section, else home.
+fn back_from(parent: Option<Target>, setting: &Setting<'_>) -> Page {
+    match (parent, &setting.setting.section) {
+        (Some(parent), _) => Page::Setting(parent),
+        (None, Some(section)) => Page::Section(section.to_string()),
+        (None, None) => Page::Home,
     }
 }
 
@@ -622,10 +791,11 @@ fn excluded_fields(setting: &Setting<'_>) -> Option<String> {
 /// A short description of the value, for buttons.
 pub(crate) fn summary<S: Schema>(
     snapshot: &Snapshot<S>,
-    setting: &Setting<'_>,
+    kind: &Kind,
+    value: Option<Value>,
     nouns: impl Fn(&str) -> (&'static str, &'static str),
 ) -> String {
-    let Some(value) = setting.value(snapshot) else {
+    let Some(value) = value else {
         return "not set".to_string();
     };
     let count = |count: usize, one: &str, many: &str| match count {
@@ -634,7 +804,7 @@ pub(crate) fn summary<S: Schema>(
         count => format!("{count} {many}"),
     };
 
-    let summary = match setting.kind {
+    let summary = match kind {
         Kind::SetOf { choices, inverted } => {
             let listed = list(Some(&value));
             let choices = choices.resolve(snapshot);
