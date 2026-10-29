@@ -57,16 +57,16 @@ not from crates.io or a Go proxy release:
 # Cargo.toml
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
 # SeaORM) and `cli` (a clap subcommand to view and change the settings).
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.7.0", features = ["cli", "sea-orm"] }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.8.0", features = ["cli", "sea-orm"] }
 # The settings panel engine, for writing a front end. Feature: `sea-orm`
 # (keep the handles of long buttons in a SQL table).
-botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.7.0" }
+botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.8.0" }
 # A Telegram settings panel (teloxide) over a botconf store, drawn by the
 # engine. Feature: `sea-orm` (as above).
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.7.0", features = ["sea-orm"] }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.8.0", features = ["sea-orm"] }
 # The gRPC service (tonic 0.12) serving a store and its panel to remote
 # clients. Building it needs `protoc` on the PATH.
-botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.7.0" }
+botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.8.0" }
 ```
 
 Minimum Rust: 1.95 for `botconf`, `botconf-panel` and `botconf-grpc`, 1.96
@@ -78,8 +78,29 @@ host if you want JSON objects to keep their written order.
 
 ```sh
 # Go: the settings client (see "Go" below)
-go get github.com/propheci/botconf/go@go/v0.7.0
+go get github.com/propheci/botconf/go@go/v0.8.0
 ```
+
+### Reloading
+
+`SettingsStore::load` takes the base (the layers below the stored overrides)
+as a `BaseSource`:
+
+```rust
+// Re-read on every reload: edits to the config file apply on `reload()`.
+let store = SettingsStore::load(schema, move || AppConfig::figment(&path), storage).await?;
+
+// A fixed base: figment read the file when it was merged, so `reload()`
+// re-reads only the stored overrides.
+let store = SettingsStore::load(schema, figment, storage).await?;
+```
+
+`reload()` rebuilds the base from a closure source, then re-reads the stored
+overrides. A file that became invalid, or a source that fails, is refused
+with the reason, and the current settings stay. Sections registered at
+runtime keep their own base. Keys the host reads only at startup (a bot token,
+a database URL, a listen address) change in the snapshot on reload but still
+need a restart to take effect; document them in the host.
 
 ### Reference kinds
 

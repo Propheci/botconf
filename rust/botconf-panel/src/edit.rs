@@ -50,7 +50,7 @@ pub async fn apply<S: Schema>(
         Edit::Reload => {
             let change = store.reload().await?;
             let notice = format!(
-                "🔄 Reloaded: {} stored setting(s) applied, {} ignored",
+                "🔄 Reloaded the configuration: {} stored setting(s) applied, {} ignored",
                 change.current.overrides().len(),
                 change.current.ignored().len()
             );

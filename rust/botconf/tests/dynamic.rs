@@ -380,3 +380,35 @@ async fn unset_clears_parked_overrides() {
         .unwrap();
     assert_eq!(store.current().value("connectors.a.limit"), Some(json!(3)));
 }
+
+#[test]
+#[allow(clippy::result_large_err)] // `figment::Jail`'s API.
+fn dynamic_sections_keep_their_base_across_reload() {
+    figment::Jail::expect_with(|jail| {
+        jail.create_file("config.toml", r#"greeting = "hi""#)?;
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            let source = || Ok::<_, figment::Error>(Figment::from(Toml::file("config.toml")));
+            let store = SettingsStore::load(Host, source, MemoryStorage::new())
+                .await
+                .unwrap();
+            store
+                .register_section(connector("a", json!({ "limit": 3 })))
+                .await
+                .unwrap();
+
+            jail.create_file("config.toml", r#"greeting = "hello""#)
+                .unwrap();
+            store.reload().await.unwrap();
+
+            let snapshot = store.current();
+            assert_eq!(snapshot.config.greeting, "hello");
+            assert_eq!(snapshot.value("connectors.a.limit"), Some(json!(3)));
+            assert_eq!(
+                snapshot.source("connectors.a.limit"),
+                Source::Other("connector a".into())
+            );
+        });
+        Ok(())
+    });
+}

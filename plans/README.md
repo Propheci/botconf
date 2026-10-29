@@ -27,12 +27,12 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 2 | 002 | Declare the minimum Rust versions (1.95, 1.96 for botconf-telegram) and test them in CI | P1 | S | 001 | `v0.1.1` | DONE |
 | 3 | 003 | `Kind::Ref { domain, many }` replaces the Telegram id kinds; actors become strings | P1 | M | 001, 002 | `v0.2.0` | DONE (see execution notes; the assistant bot moved to `v0.2.0` in its `e6f8e83`) |
 | 4 | 009 | Owned descriptors (`Shared`) and sections registered at runtime | P1 | L | 003 | `v0.3.0` | DONE (see execution notes; the assistant bot moved to `v0.3.0` in its `a815f3b`) |
-| 5 | 004 | Platform-neutral panel engine (`botconf-panel`) with hybrid tokens; botconf-telegram renders it | P1 | L | 003, 009 | `v0.4.0` | DONE (see execution notes; assistant bot branch `botconf-v0.4` pending the owner) |
+| 5 | 004 | Platform-neutral panel engine (`botconf-panel`) with hybrid tokens; botconf-telegram renders it | P1 | L | 003, 009 | `v0.4.0` | DONE (see execution notes; the assistant bot moved to `v0.4.0` in its `e356c41`) |
 | 6 | 005 | `botconf.v1.Settings` gRPC service (`botconf-grpc`) | P1 | L | 004, 009 | `v0.5.0` | DONE (see execution notes) |
 | 7 | 006 | Go module and settings client | P1 | M | 005 | `v0.6.0`, `go/v0.6.0` | DONE (see execution notes) |
 | 8 | 007 | Go panel renderers: Telegram bots, Telegram user accounts (inline-bot trick), Discord | P2 | L | 006 | `v0.7.0`, `go/v0.7.0` | DONE (see execution notes; one live test of the inline route is the owner's) |
 | 9 | 008 | SPIKE (roadmap): a Go port of the store | P3 | M | 005, 006, 009 | — | TODO |
-| 10 | 010 | `reload()` re-reads the config file (`BaseSource`) | P1 | S | 009 | `v0.8.0`, `go/v0.8.0` | TODO |
+| 10 | 010 | `reload()` re-reads the config file (`BaseSource`) | P1 | S | 009 | `v0.8.0`, `go/v0.8.0` | DONE (see execution notes; assistant bot branch `botconf-v0.8` pending the owner) |
 | 11 | 011 | Drafts in the settings panel (`required`/`when` fields, `SettingsStore::check`) | P1 | M–L | 004, 005, 009, 010 | `v0.9.0`, `go/v0.9.0` | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
@@ -503,3 +503,33 @@ each is marked in its plan):
     check that the message is edited.
   - **Skipped locally:** `nix flake check` (CI runs it). Every Go command ran
     niced with `GOMAXPROCS=2` and `-p=2`.
+- **010 done 2026-10-29** (tag `v0.8.0`, `go/v0.8.0`). Drift check empty.
+  Done as planned:
+  - `BaseSource` lives in a new `rust/botconf/src/base.rs`, re-exported with
+    `BaseError`. The two impls (a `Figment`, and closures returning
+    `Result<Figment, E>`) compiled without E0119, so every existing call site
+    that passes a `Figment` is unchanged.
+  - The store keeps the source and an `ArcSwap<Figment>`. `fn layers` takes
+    the base explicitly, and each operation loads it once with the write lock
+    held. `reload()` builds the snapshot over the new base and stores the base
+    only after that succeeded; a failing source is
+    `InvalidBase(BuildError::Source(reason))`.
+  - Tests: 6 new (5 in `tests/store.rs`, 1 in `tests/dynamic.rs`); botconf is
+    now 19 unit, 11 dynamic, 16 store and 1 doc. Mutation checks, each made a
+    test fail: `reload` keeping the old base (4 store tests and the dynamic
+    one), storing the new base before validating it
+    (`reload_keeps_the_snapshot_when_the_file_becomes_invalid`), and not
+    storing it at all (`overrides_still_win_over_an_edited_file`).
+  - Wording: the CLI, the panel's reload notice and the panel's text command
+    now say "Reloaded the configuration: …". The text command
+    (`botconf-panel/src/command.rs`) was not in the plan's list; it carried
+    the same text, so it was changed to match.
+  - README: a "Reloading" subsection under "Using it"; tag examples at
+    `v0.8.0`. Crate versions `0.8.0`; the lock moved only those.
+  - The test helper `rereading()` carries `#[allow(clippy::result_large_err)]`
+    (its closure returns `figment::Error`, as `Figment::extract` does).
+  - Gate (niced, 2 jobs, botconf's dev shell): workspace tests, clippy with
+    `-D warnings`, `cargo fmt --check` and taplo clean. Skipped: `nix flake
+    check` (CI runs it).
+  - Row 004's note was stale (its assistant bot branch was merged as
+    `e356c41`) and now says so.

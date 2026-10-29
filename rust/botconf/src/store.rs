@@ -7,6 +7,7 @@ use tokio::sync::{Mutex, watch};
 
 use crate::{
     Schema,
+    base::BaseSource,
     dynamic::DynamicSection,
     keys::{Catalog, CatalogEntry, UnknownKey, is_below},
     provider::Override,
@@ -48,6 +49,9 @@ pub enum BuildError {
 
     #[error("{0}")]
     Invalid(String),
+
+    #[error("the configuration sources failed: {0}")]
+    Source(String),
 }
 
 /// Owns the effective configuration and every change to it.
@@ -66,7 +70,11 @@ pub struct SettingsStore<S: Schema> {
     schema: Arc<S>,
     sections: Arc<[Section]>,
     namespaces: Vec<&'static str>,
-    base: Figment,
+    /// Rebuilds the base on every reload.
+    source: Box<dyn BaseSource>,
+    /// The base every change layers on: swapped, under the write lock, only
+    /// after a reload built a valid snapshot from a new one.
+    base: ArcSwap<Figment>,
     storage: Box<dyn Storage>,
     /// Swapped, under the write lock, when sections are registered or
     /// removed; it only ever grows (see [`Catalog`]).
@@ -116,14 +124,16 @@ impl<S: Schema> std::fmt::Debug for SettingsStore<S> {
 }
 
 impl<S: Schema> SettingsStore<S> {
-    /// Layers the stored overrides on top of `base`.
+    /// Layers the stored overrides on top of the base from `source`: a
+    /// [`Figment`] is a fixed base, while a closure returning one is asked
+    /// again on every [`reload`](Self::reload) (see [`BaseSource`]).
     ///
     /// Stored overrides that are invalid are skipped with a warning rather
     /// than failing, which would make them impossible to fix at runtime.
     /// Those below a dynamic namespace wait for their section to register.
     pub async fn load(
         schema: S,
-        base: Figment,
+        source: impl BaseSource,
         storage: impl Storage,
     ) -> Result<Self, SettingsError> {
         let schema = Arc::new(schema);
@@ -131,6 +141,8 @@ impl<S: Schema> SettingsStore<S> {
         let namespaces = schema.dynamic_namespaces();
         let catalog = Catalog::new(&schema.settings(), &sections);
         let storage: Box<dyn Storage> = Box::new(storage);
+        let source: Box<dyn BaseSource> = Box::new(source);
+        let base = read_base(source.as_ref())?;
 
         let layers = Layers {
             schema: &schema,
@@ -146,7 +158,8 @@ impl<S: Schema> SettingsStore<S> {
             schema,
             sections,
             namespaces,
-            base,
+            source,
+            base: ArcSwap::from_pointee(base),
             storage,
             catalog: ArcSwap::from_pointee(catalog),
             current: ArcSwap::new(Arc::clone(&snapshot)),
@@ -189,18 +202,26 @@ impl<S: Schema> SettingsStore<S> {
         self.write_lock.lock().await.sections()
     }
 
-    /// Rebuilds the configuration from the base sources and the storage,
-    /// e.g. after another process changed the stored overrides.
+    /// Rebuilds the base from its sources (the config file and the
+    /// environment, for a closure source; a fixed [`Figment`] stays as it
+    /// is), then re-reads the stored overrides, e.g. after the file was
+    /// edited or another process changed the stored overrides.
+    ///
+    /// A source that fails, or a new base that is invalid, is refused with
+    /// the reason: the current base and snapshot stay. Sections registered at
+    /// runtime keep their own base.
     pub async fn reload(&self) -> Result<Change<S>, SettingsError> {
         let registry = self.write_lock.lock().await;
         let dynamic = registry.sections();
+        let base = read_base(self.source.as_ref())?;
         let snapshot = load_snapshot(
-            &self.layers(&dynamic),
+            &self.layers(&base, &dynamic),
             self.storage.as_ref(),
             &self.catalog.load(),
             &self.namespaces,
         )
         .await?;
+        self.base.store(Arc::new(base));
         Ok(self.publish(snapshot))
     }
 
@@ -285,7 +306,8 @@ impl<S: Schema> SettingsStore<S> {
             .filter_map(|key| parked.remove_entry(&key))
             .collect();
 
-        let layers = self.layers(&dynamic);
+        let base = self.base.load_full();
+        let layers = self.layers(&base, &dynamic);
         let mut snapshot = build(&layers, overrides, parked, previous.ignored.clone())
             .map_err(|error| invalid(error.to_string()))?;
         for (key, value) in waiting {
@@ -324,8 +346,9 @@ impl<S: Schema> SettingsStore<S> {
         let mut overrides = previous.overrides.clone();
         let mut parked = previous.parked.clone();
         park_below(&mut overrides, &mut parked, &removed.section.path);
+        let base = self.base.load_full();
         let snapshot = build(
-            &self.layers(&dynamic),
+            &self.layers(&base, &dynamic),
             overrides,
             parked,
             previous.ignored.clone(),
@@ -455,8 +478,9 @@ impl<S: Schema> SettingsStore<S> {
             ignored.remove(key);
         }
 
+        let base = self.base.load_full();
         let snapshot = build(
-            &self.layers(&registry.sections()),
+            &self.layers(&base, &registry.sections()),
             overrides,
             parked,
             ignored,
@@ -503,8 +527,9 @@ impl<S: Schema> SettingsStore<S> {
         ignored.remove(key);
         overrides.insert(key.to_string(), value.clone());
 
+        let base = self.base.load_full();
         let snapshot = build(
-            &self.layers(&registry.sections()),
+            &self.layers(&base, &registry.sections()),
             overrides,
             previous.parked.clone(),
             ignored,
@@ -588,12 +613,18 @@ impl<S: Schema> SettingsStore<S> {
         Ok(())
     }
 
-    fn layers<'a>(&'a self, dynamic: &'a [Arc<DynamicSection>]) -> Layers<'a, S> {
+    /// The layers of one operation over `base`: load it once per operation,
+    /// with the write lock held, so that one change uses one base.
+    fn layers<'a>(
+        &'a self,
+        base: &'a Figment,
+        dynamic: &'a [Arc<DynamicSection>],
+    ) -> Layers<'a, S> {
         Layers {
             schema: &self.schema,
             sections: &self.sections,
             dynamic,
-            base: &self.base,
+            base,
         }
     }
 
@@ -604,6 +635,13 @@ impl<S: Schema> SettingsStore<S> {
         self.published.send_replace(Arc::clone(&current));
         Change { previous, current }
     }
+}
+
+/// Asks `source` for the base; a failure refuses it.
+fn read_base(source: &dyn BaseSource) -> Result<Figment, SettingsError> {
+    source
+        .figment()
+        .map_err(|error| SettingsError::InvalidBase(BuildError::Source(error.to_string())))
 }
 
 /// Parses a value typed by a user: JSON if it is valid JSON (`42`, `[1, 2]`,

@@ -105,7 +105,9 @@ pub fn render<S: Schema>(outcome: &Outcome<S>) -> String {
         Outcome::NotOverridden(key) => format!("{key} is not overridden"),
         Outcome::Reloaded {
             overrides, ignored, ..
-        } => format!("Reloaded: {overrides} stored setting(s) applied, {ignored} ignored"),
+        } => format!(
+            "Reloaded the configuration: {overrides} stored setting(s) applied, {ignored} ignored"
+        ),
     }
 }
 

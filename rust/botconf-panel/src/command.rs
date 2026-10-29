@@ -159,7 +159,8 @@ pub(crate) fn render<S: Schema>(outcome: &Outcome<S>, command: &str) -> Text {
             overrides, ignored, ..
         } => {
             text.push_plain(format!(
-                "✅ Reloaded: {overrides} stored setting(s) applied, {ignored} ignored"
+                "✅ Reloaded the configuration: {overrides} stored setting(s) applied, {ignored} \
+                 ignored"
             ));
         }
     }

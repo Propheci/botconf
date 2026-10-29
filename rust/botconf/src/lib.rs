@@ -59,6 +59,7 @@
 //! # }
 //! ```
 
+mod base;
 #[cfg(feature = "cli")]
 pub mod cli;
 pub mod command;
@@ -75,6 +76,7 @@ mod store;
 use serde::{Serialize, de::DeserializeOwned};
 
 pub use self::{
+    base::{BaseError, BaseSource},
     dynamic::{DynamicSection, Validator},
     keys::{Catalog, CatalogEntry, RuntimeSetting, UnknownKey},
     kind::{Choice, Choices, DynamicChoices, Field, FixedChoice, Form, Kind},

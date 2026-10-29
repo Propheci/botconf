@@ -358,3 +358,121 @@ async fn subscribers_see_changes() {
     store.set("greeting", json!(""), None).await.unwrap_err();
     assert!(!published.has_changed().unwrap());
 }
+
+/// Runs `test` inside a [`Jail`] holding `config.toml` with `BASE`, on a
+/// tokio runtime.
+#[allow(clippy::result_large_err)] // `figment::Jail`'s API.
+fn in_jail(test: impl AsyncFnOnce(&mut Jail)) {
+    Jail::expect_with(|jail| {
+        jail.create_file("config.toml", BASE)?;
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(test(jail));
+        Ok(())
+    });
+}
+
+/// A source that reads `config.toml` again on every call.
+#[allow(clippy::result_large_err)] // `figment::Error`, as `Figment::extract` returns.
+fn rereading() -> impl Fn() -> Result<Figment, figment::Error> + Send + Sync + 'static {
+    || Ok(Figment::from(Toml::file("config.toml")))
+}
+
+#[test]
+fn reload_reads_an_edited_file() {
+    in_jail(async |jail| {
+        let store = SettingsStore::load(Toy::default(), rereading(), MemoryStorage::new())
+            .await
+            .unwrap();
+        assert_eq!(store.current().config.greeting, "hi");
+
+        jail.create_file("config.toml", r#"greeting = "hello""#)
+            .unwrap();
+        store.reload().await.unwrap();
+        let snapshot = store.current();
+        assert_eq!(snapshot.config.greeting, "hello");
+        assert_eq!(snapshot.source("greeting"), Source::File);
+    });
+}
+
+#[test]
+fn reload_keeps_the_snapshot_when_the_file_becomes_invalid() {
+    in_jail(async |jail| {
+        let store = SettingsStore::load(Toy::default(), rereading(), MemoryStorage::new())
+            .await
+            .unwrap();
+
+        // The schema rejects an empty greeting.
+        jail.create_file("config.toml", r#"greeting = """#).unwrap();
+        assert!(matches!(
+            store.reload().await,
+            Err(SettingsError::InvalidBase(_))
+        ));
+        assert_eq!(store.current().config.greeting, "hi");
+
+        // The old base is still the one changes layer on.
+        store.set("admins", json!([1]), None).await.unwrap();
+        assert_eq!(store.current().config.greeting, "hi");
+    });
+}
+
+#[test]
+fn reload_keeps_the_snapshot_when_the_source_fails() {
+    in_jail(async |_| {
+        let calls = AtomicUsize::new(0);
+        let source = move || {
+            if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(Figment::from(Toml::file("config.toml")))
+            } else {
+                Err("the config file is gone")
+            }
+        };
+        let store = SettingsStore::load(Toy::default(), source, MemoryStorage::new())
+            .await
+            .unwrap();
+
+        let error = store.reload().await.unwrap_err();
+        assert!(
+            matches!(
+                error,
+                SettingsError::InvalidBase(botconf::BuildError::Source(ref reason))
+                    if reason == "the config file is gone"
+            ),
+            "{error}"
+        );
+        assert_eq!(store.current().config.greeting, "hi");
+    });
+}
+
+#[test]
+fn overrides_still_win_over_an_edited_file() {
+    in_jail(async |jail| {
+        let store = SettingsStore::load(Toy::default(), rereading(), MemoryStorage::new())
+            .await
+            .unwrap();
+        store.set("greeting", json!("stored"), None).await.unwrap();
+
+        jail.create_file("config.toml", r#"greeting = "edited""#)
+            .unwrap();
+        store.reload().await.unwrap();
+        assert_eq!(store.current().config.greeting, "stored");
+
+        // Later changes layer on the edited file.
+        store.unset("greeting").await.unwrap().unwrap();
+        assert_eq!(store.current().config.greeting, "edited");
+    });
+}
+
+#[test]
+fn a_fixed_base_does_not_reread() {
+    in_jail(async |jail| {
+        let base = Figment::from(Toml::file("config.toml"));
+        let store = SettingsStore::load(Toy::default(), base, MemoryStorage::new())
+            .await
+            .unwrap();
+
+        jail.create_file("config.toml", r#"greeting = "hello""#)
+            .unwrap();
+        store.reload().await.unwrap();
+        assert_eq!(store.current().config.greeting, "hi");
+    });
+}
