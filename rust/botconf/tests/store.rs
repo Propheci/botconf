@@ -342,3 +342,19 @@ async fn an_invalid_base_is_refused() {
         Err(SettingsError::InvalidBase(_))
     ));
 }
+
+#[tokio::test]
+async fn subscribers_see_changes() {
+    let store = store().await;
+    let mut published = store.subscribe();
+    assert_eq!(published.borrow_and_update().config.greeting, "hi");
+
+    store.set("greeting", json!("hello"), None).await.unwrap();
+    // Published before `set` returns.
+    assert!(published.has_changed().unwrap());
+    assert_eq!(published.borrow_and_update().config.greeting, "hello");
+
+    // A rejected change publishes nothing.
+    store.set("greeting", json!(""), None).await.unwrap_err();
+    assert!(!published.has_changed().unwrap());
+}

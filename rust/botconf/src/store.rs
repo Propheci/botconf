@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, ops::Range, sync::Arc};
 use arc_swap::ArcSwap;
 use figment::Figment;
 use serde_json::Value;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
 
 use crate::{
     Schema,
@@ -72,6 +72,8 @@ pub struct SettingsStore<S: Schema> {
     /// removed; it only ever grows (see [`Catalog`]).
     catalog: ArcSwap<Catalog>,
     current: ArcSwap<Snapshot<S>>,
+    /// Sent every published snapshot, for [`Self::subscribe`].
+    published: watch::Sender<Arc<Snapshot<S>>>,
     /// Serialises the read-modify-write cycles of the changes, and holds the
     /// sections registered at runtime.
     write_lock: Mutex<Registry>,
@@ -138,6 +140,7 @@ impl<S: Schema> SettingsStore<S> {
         };
         let snapshot = load_snapshot(&layers, storage.as_ref(), &catalog, &namespaces).await?;
         schema.on_change(None, &snapshot);
+        let snapshot = Arc::new(snapshot);
 
         Ok(Self {
             schema,
@@ -146,7 +149,8 @@ impl<S: Schema> SettingsStore<S> {
             base,
             storage,
             catalog: ArcSwap::from_pointee(catalog),
-            current: ArcSwap::from_pointee(snapshot),
+            current: ArcSwap::new(Arc::clone(&snapshot)),
+            published: watch::Sender::new(snapshot),
             write_lock: Mutex::new(Registry::default()),
         })
     }
@@ -155,6 +159,13 @@ impl<S: Schema> SettingsStore<S> {
     /// duration of one operation so that changes are picked up.
     pub fn current(&self) -> Arc<Snapshot<S>> {
         self.current.load_full()
+    }
+
+    /// A receiver that sees every published snapshot: it holds the latest,
+    /// and [`changed`](watch::Receiver::changed) resolves when a newer one
+    /// is published (a reader that falls behind skips to the latest).
+    pub fn subscribe(&self) -> watch::Receiver<Arc<Snapshot<S>>> {
+        self.published.subscribe()
     }
 
     /// The keys that can be changed at runtime. Cheap; like
@@ -590,6 +601,7 @@ impl<S: Schema> SettingsStore<S> {
         let current = Arc::new(snapshot);
         let previous = self.current.swap(Arc::clone(&current));
         self.schema.on_change(Some(&previous), &current);
+        self.published.send_replace(Arc::clone(&current));
         Change { previous, current }
     }
 }
