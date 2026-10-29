@@ -33,7 +33,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 8 | 007 | Go panel renderers: Telegram bots, Telegram user accounts (inline-bot trick), Discord | P2 | L | 006 | `v0.7.0`, `go/v0.7.0` | DONE (see execution notes; one live test of the inline route is the owner's) |
 | 9 | 008 | SPIKE (roadmap): a Go port of the store | P3 | M | 005, 006, 009 | — | TODO |
 | 10 | 010 | `reload()` re-reads the config file (`BaseSource`) | P1 | S | 009 | `v0.8.0`, `go/v0.8.0` | DONE (see execution notes; assistant bot branch `botconf-v0.8` pending the owner) |
-| 11 | 011 | Drafts in the settings panel (`required`/`when` fields, `SettingsStore::check`) | P1 | M–L | 004, 005, 009, 010 | `v0.9.0`, `go/v0.9.0` | TODO |
+| 11 | 011 | Drafts in the settings panel (`required`/`when` fields, `SettingsStore::check`) | P1 | M–L | 004, 005, 009, 010 | `v0.9.0`, `go/v0.9.0` | DONE (see execution notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -533,3 +533,61 @@ each is marked in its plan):
     check` (CI runs it).
   - Row 004's note was stale (its assistant bot branch was merged as
     `e356c41`) and now says so.
+- **011 done 2026-10-29** (tag `v0.9.0`, `go/v0.9.0`). The drift check was
+  empty. Done as planned:
+  - **Declarations and wire.** `Field::required()` and `Field::when(key, value)`
+    are `const` builders in the `group` pattern, and they compile on 1.95.
+    `Form` gains `applying`, `missing` and `drop_inapplicable`, plus a
+    per-field `Field::applies`.
+  - **Dry run.** `SettingsStore::check` shares a new `prepare` step with
+    `modify`; `modify` stores and publishes only what `prepare` built.
+  - **Wire.** `FormField.required = 5` and `when = 6`, carried by a new
+    `FieldCondition` message. The Go bindings were regenerated with the pinned
+    generators (protoc 34.1, protoc-gen-go 1.36.11, protoc-gen-go-grpc 1.6.2).
+    The only semantic changes are the two fields and the new message. The rest
+    of the diff in `settings.pb.go` is message indices shifting by one.
+  - **Engine.**
+    - `Page::Draft(Target, Value)`, `Action::InDraft { value, then }` and
+      `Action::SaveDraft(Target, Value)`. Draft JSON inside `Page` and
+      `InDraft` is escaped like entry names, so it holds no separator.
+    - `Question` gains `draft` (encoded after a `|`, with `%` and `|`
+      escaped), plus a `Question::new` constructor.
+    - `Setting::set_in` (the field change with group clearing and the `when`
+      cleanup) and `Setting::value_in`.
+    - The private screen type is renamed `Building`.
+  - **Tests:** 11 new.
+    - botconf: `form_missing_lists_required_applying_fields`,
+      `when_hides_fields`, `check_validates_without_storing`.
+    - botconf-grpc: `form_fields_round_trip_required_and_when`.
+    - The panel's 7 planned tests. The panel's own `buttons_round_trip` also
+      gained the draft encodings.
+    - Totals: botconf 21 unit, 11 dynamic, 17 store and 1 doc; botconf-panel
+      44 with `--all-features`; botconf-grpc 29; botconf-telegram 10.
+    - The four mutations each failed tests: saving entries directly again
+      (5 tests), no `when` cleanup (`switching_a_kind_opens_a_draft`), Save
+      skipping the store (3), and draft answers going to the store (3).
+
+  Deviations:
+  - **Typed answers also start drafts.** A typed answer to a field of a stored
+    form, whose result the store would refuse, opens a draft too, like a
+    pressed button does. A typed whole value (`/config set`, or "name value"
+    for a non-form entry) is still saved or refused, as decided.
+  - **Struct literals moved to `Question::new`.** `Question` grew a public
+    field, so the struct literals in three existing tests became
+    `Question::new(..)`: the panel's `answer` helper and its
+    `questions_name_the_setting_and_offer_pickers`, botconf-telegram's
+    `input.rs` test, and botconf-grpc's `convert.rs` test. No assertion
+    changed.
+  - **Draft questions offer candidates against the draft.** Candidate buttons
+    for a reference list inside a draft are wrapped in `InDraft`, and the
+    "Now" line comes from the draft.
+  - **A smaller error type.** `draft_edit` returns a small `DraftProblem` (a
+    notice; the draft is redrawn) instead of `Problem`, because clippy flagged
+    the bigger error once `Page` could hold a draft.
+  - **One commit for Steps 2–4.** The engine and its tests share files, so
+    they landed as one commit.
+  - **Gate.** Niced, with 2 jobs, in botconf's dev shell: workspace tests,
+    clippy with `-D warnings`, `cargo fmt --check` and taplo were clean, and
+    so were `go vet` and `go test -race` (niced, `GOMAXPROCS=2`, `-p=2`).
+    Skipped: `nix flake check` (CI runs it) and the local MSRV matrix (only
+    `botconf` was checked on 1.95).

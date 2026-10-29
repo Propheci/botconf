@@ -39,7 +39,8 @@ history ([plan 001](plans/001-extract-crates.md)); their earlier life inside
 that bot's `src/settings/` stays in its repository. The panel engine
 (`botconf-panel`) landed in plan 004 and the gRPC service (`botconf-grpc`) in
 plan 005, the Go client (`go/settings`) in plan 006, and the Go panel
-renderers (`go/render/telegram`, `go/render/discord`) in plan 007.
+renderers (`go/render/telegram`, `go/render/discord`) in plan 007. Plan 010 made
+`reload()` re-read the config file, and plan 011 added drafts to the panel.
 [`plans/README.md`](plans/README.md) has the order and the status of each.
 
 Develop inside the Nix dev shell (`nix develop`, or `direnv allow`), which
@@ -57,16 +58,16 @@ not from crates.io or a Go proxy release:
 # Cargo.toml
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
 # SeaORM) and `cli` (a clap subcommand to view and change the settings).
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.8.0", features = ["cli", "sea-orm"] }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.9.0", features = ["cli", "sea-orm"] }
 # The settings panel engine, for writing a front end. Feature: `sea-orm`
 # (keep the handles of long buttons in a SQL table).
-botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.8.0" }
+botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.9.0" }
 # A Telegram settings panel (teloxide) over a botconf store, drawn by the
 # engine. Feature: `sea-orm` (as above).
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.8.0", features = ["sea-orm"] }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.9.0", features = ["sea-orm"] }
 # The gRPC service (tonic 0.12) serving a store and its panel to remote
 # clients. Building it needs `protoc` on the PATH.
-botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.8.0" }
+botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.9.0" }
 ```
 
 Minimum Rust: 1.95 for `botconf`, `botconf-panel` and `botconf-grpc`, 1.96
@@ -78,7 +79,7 @@ host if you want JSON objects to keep their written order.
 
 ```sh
 # Go: the settings client (see "Go" below)
-go get github.com/propheci/botconf/go@go/v0.8.0
+go get github.com/propheci/botconf/go@go/v0.9.0
 ```
 
 ### Reloading
@@ -162,6 +163,25 @@ Settings described at runtime are built with `RuntimeSetting::owned` or by
 setting the fields (`Kind::Ref { domain: id.into(), many }`, ...); the
 builders (`titled`, `kind`, ...) are meant for `const` declarations.
 
+A form whose value is only valid once several fields are set declares them
+with `required()`, and a field that only applies to one kind of value with
+`when(key, value)`. The panel then offers a new entry (or a change that
+leaves the value incomplete) as a draft, asking for the missing fields before
+it saves; the store still decides what is valid.
+
+```rust
+const KINDS: &[FixedChoice] = &[FixedChoice::new("a", "A"), FixedChoice::new("b", "B")];
+const ROUTE_FIELDS: &[Field] = &[
+    Field::new("kind", "Kind", Kind::one_of(Choices::fixed(KINDS), false, false)).required(),
+    // Shown, and asked for, only while `kind` is "a"; dropped when it changes.
+    Field::new("x", "X", Kind::text(true)).required().when("kind", "a"),
+    Field::new("y", "Y", Kind::text(true)).required().when("kind", "b"),
+];
+```
+
+`SettingsStore::check(key, value)` validates a change exactly as `set` would,
+without storing or publishing anything.
+
 ### Sections registered at runtime
 
 A host whose settings are partly declared by someone else while it runs (a
@@ -236,6 +256,10 @@ reports what the user did:
 `Panel::command_text` handles the text form of the command (`list`, `get`,
 `set`, ...). Screens longer than `Limits::max_rows` are cut into parts with
 ◀ / ▶ buttons. `botconf-telegram` is the reference front end.
+
+Drafts (see "Declaring settings") need nothing from a front end: a draft's
+buttons are ordinary tokens (long ones become handles), and a question asked
+on a draft carries it inside its `Question`, which stays opaque.
 
 ### Tokens
 

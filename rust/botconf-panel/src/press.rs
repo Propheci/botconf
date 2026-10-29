@@ -29,6 +29,15 @@ enum Problem {
     Stale(&'static str, Page),
 }
 
+/// Why a button pressed on a draft can't do what it says. The draft is
+/// redrawn, so no page is needed.
+enum DraftProblem {
+    /// Tell the user.
+    Rejected(&'static str),
+    /// The button was drawn for a list that has changed.
+    Stale(&'static str),
+}
+
 impl<S: Schema> Panel<S> {
     /// A button was pressed: `token` is what it carried.
     pub async fn press(&self, token: &str, viewer: &Viewer<'_>) -> Result<Reaction<S>, PanelError> {
@@ -148,8 +157,10 @@ impl<S: Schema> Panel<S> {
                 Ok((form, draft)) => Ok(Reaction::screen(
                     self.render(&Page::Draft(form, draft), viewer).await,
                 )),
-                Err((Problem::Rejected(problem), _)) => Err(PanelError::Rejected(problem.into())),
-                Err((Problem::Stale(notice, _), form)) => Err(PanelError::Stale {
+                Err((DraftProblem::Rejected(problem), _)) => {
+                    Err(PanelError::Rejected(problem.into()))
+                }
+                Err((DraftProblem::Stale(notice), form)) => Err(PanelError::Stale {
                     notice: notice.into(),
                     screen: match form {
                         Some(form) => self.render(&Page::Draft(form, value), viewer).await,
@@ -167,7 +178,7 @@ impl<S: Schema> Panel<S> {
         &self,
         value: &Value,
         action: Action,
-    ) -> Result<(Target, Value), (Problem, Option<Target>)> {
+    ) -> Result<(Target, Value), (DraftProblem, Option<Target>)> {
         let snapshot = self.store.current();
         let catalog = self.store.catalog();
         let target = match &action {
@@ -178,14 +189,16 @@ impl<S: Schema> Panel<S> {
             | Action::Add(target, _)
             | Action::Remove(target, _)
             | Action::Clear(target) => target.clone(),
-            _ => return Err((Problem::Rejected(NOT_IN_DRAFT), None)),
+            _ => return Err((DraftProblem::Rejected(NOT_IN_DRAFT), None)),
         };
         let setting = Setting::resolve(&catalog, &target)
             .filter(|setting| setting.field.is_some())
-            .ok_or((Problem::Rejected(GONE), None))?;
-        let form = target.parent().ok_or((Problem::Rejected(GONE), None))?;
+            .ok_or((DraftProblem::Rejected(GONE), None))?;
+        let form = target
+            .parent()
+            .ok_or((DraftProblem::Rejected(GONE), None))?;
         let fail = |problem| (problem, Some(form.clone()));
-        let changed = || fail(Problem::Stale(LIST_CHANGED, Page::Setting(target.clone())));
+        let changed = || fail(DraftProblem::Stale(LIST_CHANGED));
         let current = setting.value_in(value);
         let nth = |choice: usize| {
             setting
@@ -193,7 +206,7 @@ impl<S: Schema> Panel<S> {
                 .choices(snapshot.as_ref())
                 .into_iter()
                 .nth(choice)
-                .ok_or_else(|| fail(Problem::Rejected(NO_CHOICE)))
+                .ok_or_else(|| fail(DraftProblem::Rejected(NO_CHOICE)))
         };
 
         let field = match action {
