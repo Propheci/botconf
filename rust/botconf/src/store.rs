@@ -172,6 +172,12 @@ impl<S: Schema> SettingsStore<S> {
         &self.sections
     }
 
+    /// The sections registered at runtime, in the order they registered.
+    /// Waits for a change in progress to finish.
+    pub async fn dynamic_sections(&self) -> Vec<Arc<DynamicSection>> {
+        self.write_lock.lock().await.sections()
+    }
+
     /// Rebuilds the configuration from the base sources and the storage,
     /// e.g. after another process changed the stored overrides.
     pub async fn reload(&self) -> Result<Change<S>, SettingsError> {

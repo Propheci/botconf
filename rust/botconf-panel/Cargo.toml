@@ -1,0 +1,25 @@
+[package]
+name = "botconf-panel"
+description = "A platform-neutral settings panel engine for botconf settings: screens, buttons and answers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+## Keeps the handles of long buttons in a SQL table with SeaORM.
+sea-orm = ["dep:sea-orm"]
+
+[dependencies]
+botconf = { workspace = true }
+futures = { workspace = true }
+sea-orm = { workspace = true, optional = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+figment = { workspace = true, features = ["toml"] }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test-util"] }
