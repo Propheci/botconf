@@ -1,7 +1,7 @@
-//! A Telegram settings panel for [`botconf`] settings: every runtime setting
-//! gets an editor fitting its [`Kind`](botconf::Kind) (toggles, pick-one
-//! buttons, number pickers, forms, user and chat lists with Telegram's
-//! pickers, ...), and typed values are asked for with a [prompt](prompts).
+//! A Telegram settings panel for [`botconf`] settings: the screens of the
+//! [`botconf_panel`] engine drawn as messages with inline keyboards, typed
+//! values asked for with a [prompt](prompts), and Telegram's user and chat
+//! pickers for the [Telegram domains](domains).
 //!
 //! To use it:
 //! 1. build a [`SettingsPanel`] over the settings store, with the hooks the bot
@@ -16,22 +16,25 @@
 //! Prompt answers are plain messages: if the bot has other handlers for
 //! plain messages, route the messages that answer a prompt (see
 //! [`prompts::Prompts::waiting`]) to the panel's handler first.
+//!
+//! Buttons whose action does not fit Telegram's 64 bytes of callback data
+//! carry a handle kept in a [`TokenStore`]: in memory by default, or in the
+//! database with [`SettingsPanel::token_store`] (feature `sea-orm`:
+//! `SeaOrmTokenStore`), so that they keep working after a restart.
 
-mod callback;
 pub mod domains;
-mod edit;
 mod handlers;
 mod input;
 mod names;
-mod panel;
 pub mod prompts;
+mod render;
 #[cfg(test)]
 mod testing;
-mod text;
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use botconf::{Change, Schema, SettingsStore, Snapshot};
+use botconf_panel::Panel;
 use futures::future::BoxFuture;
 use teloxide::{
     RequestError,
@@ -39,8 +42,11 @@ use teloxide::{
     types::{ChatId, InlineKeyboardButton},
 };
 
+#[cfg(feature = "sea-orm")]
+pub use botconf_panel::{DEFAULT_TOKENS_TABLE, SeaOrmTokenStore, create_tokens_table};
+pub use botconf_panel::{MemoryTokenStore, Page, Target, TokenStore};
+
 pub use self::{
-    callback::{Page, Target},
     names::{Name, Names},
     prompts::Prompts,
 };
@@ -57,17 +63,12 @@ impl<R> PanelBot for R where R: Requester<Err = RequestError> + Clone + Send + S
 /// Called after each change, e.g. to refresh the command menus.
 pub type OnChange<S, R> = Arc<dyn Fn(R, Arc<Change<S>>) -> BoxFuture<'static, ()> + Send + Sync>;
 
-/// A short note about a section, e.g. `off` for a disabled feature.
-pub type SectionNote<S> = Arc<dyn Fn(&Snapshot<S>, &str) -> Option<String> + Send + Sync>;
-
 /// The panel: its settings, its hooks and how it is reached.
 pub struct SettingsPanel<S: Schema, R> {
-    store: Arc<SettingsStore<S>>,
+    panel: Panel<S>,
     prompts: Arc<Prompts>,
     names: Option<Arc<dyn Names<R>>>,
     on_change: Option<OnChange<S, R>>,
-    section_note: Option<SectionNote<S>>,
-    command: String,
     prefix: String,
     owner: &'static str,
 }
@@ -76,13 +77,15 @@ impl<S: Schema, R: PanelBot> SettingsPanel<S, R> {
     /// A panel over `store`, asking questions with `prompts` (share them with
     /// the rest of the bot, so that there is one question per user and chat).
     pub fn new(store: Arc<SettingsStore<S>>, prompts: Arc<Prompts>) -> Self {
+        let panel = Panel::new(store)
+            .domain(domains::USERS)
+            .domain(domains::CHATS)
+            .stored_label("changed from Telegram ✏️");
         Self {
-            store,
+            panel,
             prompts,
             names: None,
             on_change: None,
-            section_note: None,
-            command: "config".into(),
             prefix: DEFAULT_PREFIX.into(),
             owner: "settings",
         }
@@ -111,7 +114,7 @@ impl<S: Schema, R: PanelBot> SettingsPanel<S, R> {
         mut self,
         note: impl Fn(&Snapshot<S>, &str) -> Option<String> + Send + Sync + 'static,
     ) -> Self {
-        self.section_note = Some(Arc::new(note));
+        self.panel = self.panel.section_note(note);
         self
     }
 
@@ -119,7 +122,7 @@ impl<S: Schema, R: PanelBot> SettingsPanel<S, R> {
     /// `config`), for the panel's messages.
     #[must_use]
     pub fn command(mut self, command: impl Into<String>) -> Self {
-        self.command = command.into();
+        self.panel = self.panel.command(command);
         self
     }
 
@@ -137,8 +140,28 @@ impl<S: Schema, R: PanelBot> SettingsPanel<S, R> {
         self
     }
 
+    /// Where the handles of buttons too long for Telegram are kept (default:
+    /// in memory, until the bot stops).
+    #[must_use]
+    pub fn token_store(mut self, store: impl TokenStore) -> Self {
+        self.panel = self.panel.token_store(store);
+        self
+    }
+
+    /// How long a handle lives without being drawn again (default 30 days).
+    #[must_use]
+    pub fn token_ttl(mut self, ttl: Duration) -> Self {
+        self.panel = self.panel.token_ttl(ttl);
+        self
+    }
+
     pub fn store(&self) -> &Arc<SettingsStore<S>> {
-        &self.store
+        self.panel.store()
+    }
+
+    /// The engine, e.g. to purge its handles on a timer.
+    pub fn engine(&self) -> &Panel<S> {
+        &self.panel
     }
 
     /// Posts `page` as a new message in `chat`.
@@ -154,9 +177,14 @@ impl<S: Schema, R: PanelBot> SettingsPanel<S, R> {
 }
 
 /// A button posting `page` of the panel whose buttons have `prefix`, for
-/// panels built without access to the [`SettingsPanel`].
+/// panels built without access to the [`SettingsPanel`]. `None` if it does
+/// not fit Telegram's callback data (section ids are short, so it does).
 pub fn post_button(prefix: &str, label: &str, page: Page) -> Option<InlineKeyboardButton> {
-    panel::button(prefix, label, callback::Button::Post(page))
+    let token = botconf_panel::post_token(&page, &render::limits(prefix))?;
+    Some(InlineKeyboardButton::callback(
+        truncate(label, 48),
+        format!("{prefix}{token}"),
+    ))
 }
 
 /// Cuts `text` to `max` characters, with an ellipsis.

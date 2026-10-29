@@ -150,6 +150,23 @@ impl Prompts {
         Some(Answer { prompt, data })
     }
 
+    /// The prompt of `module` that `user` has open in `chat`, with its data,
+    /// e.g. to handle a button on the question message.
+    pub fn pending<T: Any + Clone + Send + Sync>(
+        &self,
+        module: &str,
+        chat: ChatId,
+        user: UserId,
+    ) -> Option<Answer<T>> {
+        let prompt = self
+            .lock()
+            .get(&(chat, user))
+            .filter(|prompt| prompt.module == module && prompt.asked.elapsed() < LIFETIME)?
+            .clone();
+        let data = prompt.data.downcast_ref::<T>()?.clone();
+        Some(Answer { prompt, data })
+    }
+
     /// Stops waiting for an answer.
     pub fn finish(&self, chat: ChatId, user: UserId) -> Option<Prompt> {
         self.lock().remove(&(chat, user))
@@ -162,7 +179,7 @@ impl Prompts {
     }
 }
 
-fn is_cancel(text: &str) -> bool {
+pub(crate) fn is_cancel(text: &str) -> bool {
     let text = text.trim();
     text == CANCEL || text == "/cancel" || text.starts_with("/cancel@")
 }

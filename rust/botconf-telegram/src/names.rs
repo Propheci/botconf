@@ -46,3 +46,29 @@ pub trait Names<R>: Send + Sync + 'static {
         Box::pin(async {})
     }
 }
+
+/// The bot's [`Names`] with the bot at hand, as the engine asks for them.
+pub(crate) struct BotNames<'a, R> {
+    pub(crate) names: &'a dyn Names<R>,
+    pub(crate) bot: &'a R,
+}
+
+impl<R: Send + Sync + 'static> botconf_panel::Names for BotNames<'_, R> {
+    fn name<'a>(
+        &'a self,
+        domain: &'a str,
+        id: &'a Value,
+    ) -> BoxFuture<'a, Option<botconf_panel::Name>> {
+        Box::pin(async move {
+            let name = self.names.name(self.bot, domain, id).await?;
+            Some(botconf_panel::Name {
+                full: name.full,
+                short: name.short,
+            })
+        })
+    }
+
+    fn resolve<'a>(&'a self, domain: &'a str, text: &'a str) -> BoxFuture<'a, Option<Value>> {
+        self.names.resolve(domain, text)
+    }
+}

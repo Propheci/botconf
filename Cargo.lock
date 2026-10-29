@@ -397,7 +397,7 @@ dependencies = [
 
 [[package]]
 name = "botconf"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "arc-swap",
  "chrono",
@@ -413,11 +413,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "botconf-panel"
+version = "0.4.0"
+dependencies = [
+ "botconf",
+ "figment",
+ "futures",
+ "sea-orm",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "botconf-telegram"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "botconf",
+ "botconf-panel",
  "figment",
  "futures",
  "serde",

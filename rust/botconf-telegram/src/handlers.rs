@@ -1,36 +1,35 @@
 //! The panel's entry points: the settings command, its buttons and the
-//! answers to its questions.
+//! answers to its questions, as Telegram updates. What they do is the
+//! engine's; this module draws its screens and keeps its questions.
 
 use std::sync::Arc;
 
-use botconf::{
-    Change, Kind, Schema, SettingsError,
-    command::{self, Outcome},
-    parse_value,
-};
-use serde_json::Value;
+use botconf::{Change, Schema};
+use botconf_panel::{CommandReply, Limits, PanelError, Question, Reaction, Screen, Viewer};
 use teloxide::{
     ApiError, RequestError,
     dispatching::UpdateHandler,
     prelude::*,
-    types::{MessageId, ParseMode, ReplyParameters},
+    types::{Chat, MessageId, ParseMode, ReplyParameters, UserId},
     utils::html::escape,
 };
 
 use crate::{
-    PanelBot, SettingsPanel, actor,
-    callback::{Button, Page, Target},
-    edit::{self, Edit},
-    input::{self, Question, ReadError},
-    panel::{self, Screen, Setting},
+    PanelBot, SettingsPanel, actor, input,
+    names::BotNames,
     prompts::{self, Answer},
-    text::{self, Action},
-    truncate,
+    render, truncate,
 };
 
-/// Telegram's limits, in characters.
-const MAX_MESSAGE_CHARS: usize = 4096;
 const MAX_TOAST_CHARS: usize = 200;
+
+/// A question of the panel, kept with its prompt until answered.
+#[derive(Clone, Debug)]
+pub(crate) struct Pending {
+    pub(crate) question: Question,
+    /// The panel to update once answered.
+    pub(crate) panel: MessageId,
+}
 
 impl<S: Schema, R: PanelBot> SettingsPanel<S, R> {
     /// The handler tree of the panel's buttons and questions. It reads the
@@ -40,7 +39,7 @@ impl<S: Schema, R: PanelBot> SettingsPanel<S, R> {
             .branch(
                 Update::filter_message()
                     .filter_map(|msg: Message, panel: Arc<Self>| {
-                        panel.prompts.answer::<Question>(panel.owner, &msg)
+                        panel.prompts.answer::<Pending>(panel.owner, &msg)
                     })
                     .endpoint(handle_answer::<S, R>),
             )
@@ -60,35 +59,25 @@ impl<S: Schema, R: PanelBot> SettingsPanel<S, R> {
     /// panel, `help` lists the text subcommands (`list`, `set`, ...).
     pub async fn run_command(&self, bot: &R, msg: &Message, args: &str) -> anyhow::Result<()> {
         let user = msg.from.as_ref().map(|user| user.id);
-        let usage = text::usage(&self.command);
+        let limits = self.limits();
+        let names = self.bot_names(bot);
+        let viewer = viewer(user, &limits, names.as_ref(), &msg.chat);
 
-        let (text, outcome) = match text::parse_action(args) {
-            Ok(Action::Panel) => {
-                post(self, bot, msg.chat.id, &Page::Home).await?;
+        let (text, change) = match self.panel.command_text(args, &viewer).await? {
+            CommandReply::Panel(screen) => {
+                send(self, bot, msg.chat.id, &screen).await?;
                 return Ok(());
             }
-            Ok(Action::Help) => (escape(&usage), None),
-            Ok(Action::Run(command)) => {
-                match command::execute(&self.store, command, user.and_then(actor)).await {
-                    Ok(outcome) => (text::render(&outcome, &self.command), Some(outcome)),
-                    // Infrastructure failures go to the bot's error handler.
-                    Err(error @ SettingsError::Storage(_)) => return Err(error.into()),
-                    Err(error) => (format!("❌ {}", escape(&error.to_string())), None),
-                }
-            }
-            Err(problem) => (
-                format!("❌ {}\n\n{}", escape(&problem), escape(&usage)),
-                None,
-            ),
+            CommandReply::Text { text, change } => (render::html(&text), change),
         };
 
-        bot.send_message(msg.chat.id, truncate(&text, MAX_MESSAGE_CHARS))
+        bot.send_message(msg.chat.id, truncate(&text, render::MAX_MESSAGE_CHARS))
             .parse_mode(ParseMode::Html)
             .reply_parameters(ReplyParameters::new(msg.id).allow_sending_without_reply())
             .await?;
 
         // After replying, since the hook may take a while.
-        if let Some(change) = outcome.and_then(into_change) {
+        if let Some(change) = change {
             self.changed(bot, change).await;
         }
         Ok(())
@@ -100,21 +89,30 @@ impl<S: Schema, R: PanelBot> SettingsPanel<S, R> {
         }
     }
 
-    fn closed(&self) -> Screen {
-        Screen {
-            text: escape(&format!(
-                "Settings closed; send /{} to open them again.",
-                self.command
-            )),
-            keyboard: Default::default(),
-        }
+    pub(crate) fn limits(&self) -> Limits {
+        render::limits(&self.prefix)
+    }
+
+    fn bot_names<'a>(&'a self, bot: &'a R) -> Option<BotNames<'a, R>> {
+        Some(BotNames {
+            names: self.names.as_deref()?,
+            bot,
+        })
     }
 }
 
-fn into_change<S: Schema>(outcome: Outcome<S>) -> Option<Change<S>> {
-    match outcome {
-        Outcome::Changed { change, .. } | Outcome::Reloaded { change, .. } => Some(change),
-        _ => None,
+/// Who is looking at the panel, from where.
+fn viewer<'a, R: PanelBot>(
+    user: Option<UserId>,
+    limits: &'a Limits,
+    names: Option<&'a BotNames<'a, R>>,
+    chat: &Chat,
+) -> Viewer<'a> {
+    Viewer {
+        actor: user.and_then(actor),
+        limits,
+        names: names.map(|names| names as &dyn botconf_panel::Names),
+        pickers: prompts::pickers_work_in(chat),
     }
 }
 
@@ -123,196 +121,118 @@ async fn handle_button<S: Schema, R: PanelBot>(
     query: CallbackQuery,
     panel: Arc<SettingsPanel<S, R>>,
 ) -> anyhow::Result<()> {
-    let button = query
+    let token = query
         .data
         .as_deref()
-        .and_then(|data| Button::parse(&panel.prefix, data));
-    let (Some(button), Some(message)) = (button, query.regular_message()) else {
+        .and_then(|data| data.strip_prefix(&panel.prefix));
+    let (Some(token), Some(message)) = (token, query.regular_message()) else {
         bot.answer_callback_query(query.id.clone())
             .text(format!(
                 "This button no longer works; send /{}",
-                panel.command
+                panel.panel.command_name()
             ))
             .show_alert(true)
             .await?;
         return Ok(());
     };
     let chat = message.chat.id;
-    let answer = |text: &str, alert: bool| {
-        bot.answer_callback_query(query.id.clone())
-            .text(truncate(text, MAX_TOAST_CHARS))
-            .show_alert(alert)
-    };
 
-    let (edit, page) = match button {
-        Button::Close => {
-            answer("", false).await?;
-            if bot.delete_message(chat, message.id).await.is_err() {
-                show(&bot, chat, message.id, &panel.closed()).await?;
-            }
-            return Ok(());
-        }
-        Button::Open(page) => {
-            answer("", false).await?;
-            let screen = panel::render(&panel, Some(&bot), &page, None).await;
-            return Ok(show(&bot, chat, message.id, &screen).await?);
-        }
-        Button::Post(page) => {
-            answer("", false).await?;
-            post(&panel, &bot, chat, &page).await?;
-            return Ok(());
-        }
-        Button::Ask(target, ask) => {
-            let catalog = panel.store.catalog();
-            let Some(setting) = Setting::resolve(&catalog, &target) else {
-                answer("This setting no longer exists", true).await?;
-                return Ok(());
-            };
-            // First, so that the button stops spinning even if asking fails.
-            answer("✏️ Waiting for your answer", false).await?;
+    // A suggestion on a question message answers the question: the panel to
+    // update is the one that asked.
+    let asked = panel
+        .prompts
+        .pending::<Pending>(panel.owner, chat, query.from.id)
+        .filter(|pending| pending.prompt.message == message.id);
+    let shown = asked.as_ref().map_or(message.id, |asked| asked.data.panel);
 
-            let current = setting.value(&panel.store.current());
-            let pickers = prompts::pickers_work_in(&message.chat);
-            let (text, markup, keyboard) =
-                input::question(&setting, ask, current.as_ref(), pickers);
-            let sent = bot
-                .send_message(chat, text)
-                .parse_mode(ParseMode::Html)
-                .reply_markup(markup)
+    let limits = panel.limits();
+    let names = panel.bot_names(&bot);
+    let viewer = viewer(Some(query.from.id), &limits, names.as_ref(), &message.chat);
+    let reaction = match panel.panel.press(token, &viewer).await {
+        Ok(reaction) => reaction,
+        Err(PanelError::Rejected(problem)) => {
+            bot.answer_callback_query(query.id.clone())
+                .text(truncate(&problem, MAX_TOAST_CHARS))
+                .show_alert(true)
                 .await?;
-
-            let question = Question {
-                target,
-                ask,
-                panel: message.id,
-            };
-            let replaced = panel.prompts.ask(
-                panel.owner,
-                chat,
-                query.from.id,
-                sent.id,
-                keyboard,
-                question,
-            );
-            if let Some(replaced) = replaced {
-                prompts::discard(&bot, chat, &replaced, "Replaced").await?;
-            }
             return Ok(());
         }
-        button => match edit_for(&panel, button) {
-            Ok(edit) => edit,
-            Err(problem) => {
-                answer(problem, true).await?;
-                return Ok(());
-            }
-        },
+        Err(PanelError::Stale { notice, screen }) => {
+            bot.answer_callback_query(query.id.clone())
+                .text(truncate(&notice, MAX_TOAST_CHARS))
+                .await?;
+            show(&panel, &bot, chat, shown, &screen).await?;
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
     };
 
-    match edit::apply(&panel.store, edit, actor(query.from.id)).await {
-        Ok(applied) => {
-            answer(&applied.notice, false).await?;
-            let screen = panel::render(&panel, Some(&bot), &page, Some(&applied.notice)).await;
-            show(&bot, chat, message.id, &screen).await?;
-            if let Some(change) = applied.change {
-                panel.changed(&bot, change).await;
-            }
-        }
-        Err(error @ SettingsError::Storage(_)) => return Err(error.into()),
-        Err(error) => {
-            answer(&format!("❌ {error}"), true).await?;
-        }
+    if let Some(asked) = &asked {
+        panel.prompts.finish(chat, query.from.id);
+        let notice = reaction.notice.as_deref().unwrap_or("OK");
+        prompts::discard(&bot, chat, &asked.prompt, notice).await?;
     }
-    Ok(())
+    react(&panel, &bot, &query, chat, shown, reaction).await
 }
 
-/// The edit a button makes, and the page to show afterwards.
-fn edit_for<S: Schema, R>(
+/// Draws what a press led to.
+async fn react<S: Schema, R: PanelBot>(
     panel: &SettingsPanel<S, R>,
-    button: Button,
-) -> Result<(Edit, Page), &'static str> {
-    const GONE: &str = "This setting no longer exists";
-    const NO_CHOICE: &str = "This choice no longer exists";
-    let snapshot = panel.store.current();
-    let catalog = panel.store.catalog();
-    let key_of = |target: &Target| {
-        Setting::resolve(&catalog, target)
-            .map(|setting| setting.key())
-            .ok_or(GONE)
-    };
+    bot: &R,
+    query: &CallbackQuery,
+    chat: ChatId,
+    shown: MessageId,
+    reaction: Reaction<S>,
+) -> anyhow::Result<()> {
+    // First, so that the button stops spinning even if the rest fails.
+    let notice = reaction.notice.as_deref().unwrap_or_default();
+    bot.answer_callback_query(query.id.clone())
+        .text(truncate(notice, MAX_TOAST_CHARS))
+        .await?;
 
-    let (target, edit) = match button {
-        Button::Reload => return Ok((Edit::Reload, Page::Home)),
-        Button::Toggle(target, choice) => {
-            let setting = Setting::resolve(&catalog, &target).ok_or(GONE)?;
-            let choice = setting
-                .kind
-                .choices(snapshot.as_ref())
-                .into_iter()
-                .nth(choice)
-                .ok_or(NO_CHOICE)?;
-            let item = Value::String(choice.value);
-            let listed = matches!(
-                setting.value(&snapshot),
-                Some(Value::Array(items)) if items.contains(&item)
-            );
-            let edit = if listed {
-                setting.change_list(&snapshot, Vec::new(), Some(item))
-            } else {
-                setting.change_list(&snapshot, vec![item], None)
-            };
-            (target, edit)
+    if reaction.closed {
+        if bot.delete_message(chat, shown).await.is_err()
+            && let Some(screen) = &reaction.screen
+        {
+            show(panel, bot, chat, shown, screen).await?;
         }
-        Button::Pick(target, choice) => {
-            let setting = Setting::resolve(&catalog, &target).ok_or(GONE)?;
-            let choice = setting
-                .kind
-                .choices(snapshot.as_ref())
-                .into_iter()
-                .nth(choice)
-                .ok_or(NO_CHOICE)?;
-            if let Kind::Map { value, .. } = setting.kind {
-                // A new entry, named after the choice.
-                let empty = value
-                    .empty_value()
-                    .ok_or("This entry must be typed in; use ➕ Add")?;
-                let key = format!("{}.{}", setting.key(), choice.value);
-                let entry = target.entry(&choice.value);
-                return Ok((Edit::Set(key, empty), Page::Setting(entry)));
-            }
-            let value = setting.kind.choice_value(&choice.value);
-            let edit = setting.set(&snapshot, Some(value));
-            (target, edit)
+        return Ok(());
+    }
+    if let Some(ask) = &reaction.ask {
+        let (text, markup, keyboard) = input::question(&panel.prefix, ask);
+        let sent = bot
+            .send_message(chat, text)
+            .parse_mode(ParseMode::Html)
+            .reply_markup(markup)
+            .await?;
+        let pending = Pending {
+            question: ask.question.clone(),
+            panel: shown,
+        };
+        let replaced =
+            panel
+                .prompts
+                .ask(panel.owner, chat, query.from.id, sent.id, keyboard, pending);
+        if let Some(replaced) = replaced {
+            prompts::discard(bot, chat, &replaced, "Replaced").await?;
         }
-        Button::Remove(target, item) => {
-            let setting = Setting::resolve(&catalog, &target).ok_or(GONE)?;
-            let edit = setting.change_list(&snapshot, Vec::new(), Some(parse_value(&item)));
-            (target, edit)
-        }
-        Button::Clear(target) => {
-            let setting = Setting::resolve(&catalog, &target).ok_or(GONE)?;
-            let edit = setting.set(&snapshot, None);
-            (target, edit)
-        }
-        Button::Reset(target) => {
-            let key = key_of(&target)?;
-            (target, Edit::Reset(key))
-        }
-        Button::Delete(target) => {
-            let key = key_of(&target)?;
-            let parent = target.parent().ok_or(GONE)?;
-            return Ok((Edit::DeleteEntry(key), Page::Setting(parent)));
-        }
-        Button::Open(_) | Button::Post(_) | Button::Ask(..) | Button::Close => {
-            unreachable!("handled by handle_button")
-        }
-    };
-    Ok((edit, Page::Setting(target)))
+    }
+    if let Some(screen) = &reaction.post {
+        send(panel, bot, chat, screen).await?;
+    }
+    if let Some(screen) = &reaction.screen {
+        show(panel, bot, chat, shown, screen).await?;
+    }
+    if let Some(change) = reaction.change {
+        panel.changed(bot, change).await;
+    }
+    Ok(())
 }
 
 async fn handle_answer<S: Schema, R: PanelBot>(
     bot: R,
     msg: Message,
-    answer: Answer<Question>,
+    answer: Answer<Pending>,
     panel: Arc<SettingsPanel<S, R>>,
 ) -> anyhow::Result<()> {
     let chat = msg.chat.id;
@@ -320,55 +240,70 @@ async fn handle_answer<S: Schema, R: PanelBot>(
         return Ok(());
     };
     let Answer { prompt, data } = answer;
-    let catalog = panel.store.catalog();
-    let Some(setting) = Setting::resolve(&catalog, &data.target) else {
-        panel.prompts.finish(chat, user);
-        prompts::clean_up(&bot, &msg, &prompt, "This setting no longer exists").await?;
-        return Ok(());
+    remember_picked(&panel, &msg).await;
+
+    let limits = panel.limits();
+    let names = panel.bot_names(&bot);
+    let viewer = viewer(Some(user), &limits, names.as_ref(), &msg.chat);
+    let answered = panel
+        .panel
+        .answer(&data.question, input::input(&msg), &viewer)
+        .await;
+    let (notice, screen, change) = match answered {
+        Ok(reaction) => (
+            reaction.notice.unwrap_or_default(),
+            reaction.screen,
+            reaction.change,
+        ),
+        // The setting is gone: drop the question and show where it was.
+        Err(PanelError::Stale { notice, screen }) => (notice, Some(screen), None),
+        Err(PanelError::Rejected(problem)) => {
+            let how_to_stop = if prompt.keyboard {
+                "tap Cancel"
+            } else {
+                "send /cancel"
+            };
+            bot.send_message(
+                chat,
+                escape(&format!("❌ {problem}\nTry again, or {how_to_stop}.")),
+            )
+            .parse_mode(ParseMode::Html)
+            .reply_parameters(ReplyParameters::new(msg.id).allow_sending_without_reply())
+            .await?;
+            return Ok(());
+        }
+        Err(error) => return Err(error.into()),
     };
 
-    if Answer::<Question>::is_cancel(&msg) {
-        panel.prompts.finish(chat, user);
-        prompts::clean_up(&bot, &msg, &prompt, "Cancelled").await?;
-        return Ok(());
+    panel.prompts.finish(chat, user);
+    prompts::clean_up(&bot, &msg, &prompt, &notice).await?;
+    if let Some(screen) = &screen
+        && show(&panel, &bot, chat, data.panel, screen).await.is_err()
+    {
+        // The panel is gone: post a new one.
+        send(&panel, &bot, chat, screen).await?;
     }
-
-    let snapshot = panel.store.current();
-    let problem = match input::read(&panel, &snapshot, &setting, &data, &msg).await {
-        Ok((edit, page)) => match edit::apply(&panel.store, edit, actor(user)).await {
-            Ok(applied) => {
-                panel.prompts.finish(chat, user);
-                prompts::clean_up(&bot, &msg, &prompt, &applied.notice).await?;
-
-                let screen = panel::render(&panel, Some(&bot), &page, Some(&applied.notice)).await;
-                if show(&bot, chat, data.panel, &screen).await.is_err() {
-                    // The panel is gone: post a new one.
-                    send(&bot, chat, &screen).await?;
-                }
-                if let Some(change) = applied.change {
-                    panel.changed(&bot, change).await;
-                }
-                return Ok(());
-            }
-            Err(error @ SettingsError::Storage(_)) => return Err(error.into()),
-            Err(error) => error.to_string(),
-        },
-        Err(ReadError(problem)) => problem,
-    };
-
-    let how_to_stop = if prompt.keyboard {
-        "tap Cancel"
-    } else {
-        "send /cancel"
-    };
-    bot.send_message(
-        chat,
-        escape(&format!("❌ {problem}\nTry again, or {how_to_stop}.")),
-    )
-    .parse_mode(ParseMode::Html)
-    .reply_parameters(ReplyParameters::new(msg.id).allow_sending_without_reply())
-    .await?;
+    if let Some(change) = change {
+        panel.changed(&bot, change).await;
+    }
     Ok(())
+}
+
+/// Remembers the names of the users and chats picked with Telegram's
+/// pickers, to show them in the panel.
+pub(crate) async fn remember_picked<S: Schema, R: PanelBot>(
+    panel: &SettingsPanel<S, R>,
+    message: &Message,
+) {
+    let Some(names) = &panel.names else {
+        return;
+    };
+    if let Some(shared) = message.shared_users() {
+        names.remember_users(&shared.users).await;
+    }
+    if let Some(chat) = message.shared_chat() {
+        names.remember_chat(chat).await;
+    }
 }
 
 /// Posts `page` as a new panel.
@@ -376,32 +311,48 @@ pub(crate) async fn post<S: Schema, R: PanelBot>(
     panel: &SettingsPanel<S, R>,
     bot: &R,
     chat: ChatId,
-    page: &Page,
+    page: &botconf_panel::Page,
 ) -> anyhow::Result<()> {
-    let screen = panel::render(panel, Some(bot), page, None).await;
-    send(bot, chat, &screen).await?;
+    let limits = panel.limits();
+    let names = panel.bot_names(bot);
+    let viewer = Viewer {
+        names: names
+            .as_ref()
+            .map(|names| names as &dyn botconf_panel::Names),
+        ..Viewer::new(&limits)
+    };
+    let screen = panel.panel.render(page, &viewer).await;
+    send(panel, bot, chat, &screen).await?;
     Ok(())
 }
 
-async fn send<R: PanelBot>(bot: &R, chat: ChatId, screen: &Screen) -> Result<(), RequestError> {
-    bot.send_message(chat, truncate(&screen.text, MAX_MESSAGE_CHARS))
+async fn send<S: Schema, R: PanelBot>(
+    panel: &SettingsPanel<S, R>,
+    bot: &R,
+    chat: ChatId,
+    screen: &Screen,
+) -> Result<(), RequestError> {
+    let (text, keyboard) = render::message(&panel.prefix, screen);
+    bot.send_message(chat, text)
         .parse_mode(ParseMode::Html)
-        .reply_markup(screen.keyboard.clone())
+        .reply_markup(keyboard)
         .await?;
     Ok(())
 }
 
 /// Shows `screen` on the panel `message`.
-async fn show<R: PanelBot>(
+async fn show<S: Schema, R: PanelBot>(
+    panel: &SettingsPanel<S, R>,
     bot: &R,
     chat: ChatId,
     message: MessageId,
     screen: &Screen,
 ) -> Result<(), RequestError> {
+    let (text, keyboard) = render::message(&panel.prefix, screen);
     let edit = bot
-        .edit_message_text(chat, message, truncate(&screen.text, MAX_MESSAGE_CHARS))
+        .edit_message_text(chat, message, text)
         .parse_mode(ParseMode::Html)
-        .reply_markup(screen.keyboard.clone())
+        .reply_markup(keyboard)
         .await;
     match edit {
         Ok(_) | Err(RequestError::Api(ApiError::MessageNotModified)) => Ok(()),
@@ -411,282 +362,19 @@ async fn show<R: PanelBot>(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use botconf_panel::{Action, Page, Target};
     use serde_json::json;
-    use teloxide::{Bot, types::InlineKeyboardButtonKind};
+    use teloxide::types::InlineKeyboardButtonKind;
 
     use super::*;
     use crate::{
-        callback::Ask,
-        testing::{Toy, panel},
+        prompts::tests::message,
+        testing::{FakeNames, panel},
     };
 
     const PREFIX: &str = crate::DEFAULT_PREFIX;
-
-    fn target(panel: &SettingsPanel<Toy, Bot>, key: &str) -> Target {
-        let catalog = panel.store.catalog();
-        let position = catalog
-            .live()
-            .find(|(_, entry)| entry.key == key)
-            .unwrap()
-            .0;
-        Target::setting(position)
-    }
-
-    /// The buttons of a screen, as (label, action).
-    fn buttons(screen: &Screen) -> Vec<(String, Button)> {
-        screen
-            .keyboard
-            .inline_keyboard
-            .iter()
-            .flatten()
-            .map(|button| {
-                let InlineKeyboardButtonKind::CallbackData(data) = &button.kind else {
-                    panic!("{button:?}")
-                };
-                (button.text.clone(), Button::parse(PREFIX, data).unwrap())
-            })
-            .collect()
-    }
-
-    fn find(screen: &Screen, label: &str) -> Button {
-        buttons(screen)
-            .into_iter()
-            .find(|(text, _)| text.contains(label))
-            .unwrap_or_else(|| panic!("no {label:?} in {:?}", buttons(screen)))
-            .1
-    }
-
-    async fn render(panel: &SettingsPanel<Toy, Bot>, bot: &Bot, page: &Page) -> Screen {
-        panel::render(panel, Some(bot), page, None).await
-    }
-
-    async fn press(panel: &SettingsPanel<Toy, Bot>, bot: &Bot, button: Button) -> Screen {
-        let (edit, page) = edit_for(panel, button).unwrap();
-        let applied = edit::apply(&panel.store, edit, Some("1".into()))
-            .await
-            .unwrap();
-        panel::render(panel, Some(bot), &page, Some(&applied.notice)).await
-    }
-
-    fn value(panel: &SettingsPanel<Toy, Bot>, key: &str) -> Option<Value> {
-        panel.store.current().value(key)
-    }
-
-    #[tokio::test]
-    async fn the_home_screen_lists_the_settings_and_sections() {
-        let (panel, bot) = panel().await;
-        let home = render(&panel, &bot, &Page::Home).await;
-        let labels: Vec<_> = buttons(&home).into_iter().map(|(text, _)| text).collect();
-
-        for label in [
-            "Features: 2 of 2 on",
-            "Admins: none",
-            "Greeting: not set",
-            "Level: info",
-            "Lamp ›",
-        ] {
-            assert!(labels.contains(&label.to_string()), "{label}: {labels:?}");
-        }
-        assert_eq!(
-            find(&home, "Lamp"),
-            Button::Open(Page::Section("lamp".into()))
-        );
-
-        // Sections get the bot's note.
-        panel
-            .store
-            .set("disabled", json!(["lamp"]), None)
-            .await
-            .unwrap();
-        let home = render(&panel, &bot, &Page::Home).await;
-        find(&home, "Lamp (off) ›");
-        let lamp = render(&panel, &bot, &Page::Section("lamp".into())).await;
-        assert!(lamp.text.contains("Note: off."), "{}", lamp.text);
-    }
-
-    #[tokio::test]
-    async fn toggles_turn_features_on_and_off() {
-        let (panel, bot) = panel().await;
-        let features = Page::Setting(target(&panel, "disabled"));
-        let screen = render(&panel, &bot, &features).await;
-
-        let screen = press(&panel, &bot, find(&screen, "✅ Lamp")).await;
-        assert_eq!(value(&panel, "disabled"), Some(json!(["lamp"])));
-        assert!(screen.text.starts_with("✅ Saved"), "{}", screen.text);
-        assert!(
-            screen.text.contains("changed from Telegram"),
-            "{}",
-            screen.text
-        );
-
-        let screen = press(&panel, &bot, find(&screen, "⬜ Lamp")).await;
-        assert_eq!(value(&panel, "disabled"), Some(json!([])));
-
-        // Back to the file's value.
-        press(&panel, &bot, find(&screen, "config file's value")).await;
-        assert!(panel.store.current().overrides().is_empty());
-    }
-
-    #[tokio::test]
-    async fn choices_are_picked() {
-        let (panel, bot) = panel().await;
-        let level = Page::Setting(target(&panel, "level"));
-        let screen = render(&panel, &bot, &level).await;
-
-        let screen = press(&panel, &bot, find(&screen, "debug (verbose)")).await;
-        assert_eq!(panel.store.current().config.level, "debug");
-        assert!(
-            buttons(&screen)
-                .iter()
-                .any(|(label, _)| label == "🔘 debug (verbose)")
-        );
-        assert_eq!(
-            find(&screen, "Other"),
-            Button::Ask(target(&panel, "level"), Ask::Value)
-        );
-    }
-
-    #[tokio::test]
-    async fn map_entries_are_added_from_their_names_and_deleted() {
-        let (panel, bot) = panel().await;
-        let access = target(&panel, "access");
-        let screen = render(&panel, &bot, &Page::Setting(access.clone())).await;
-
-        // A new entry, opened right away.
-        let screen = press(&panel, &bot, find(&screen, "➕ Lamp")).await;
-        assert_eq!(value(&panel, "access.lamp"), Some(json!([])));
-        assert!(screen.text.contains("Access › lamp"), "{}", screen.text);
-        assert_eq!(
-            find(&screen, "➕ Add"),
-            Button::Ask(access.entry("lamp"), Ask::Items)
-        );
-
-        edit::apply(
-            &panel.store,
-            Edit::Extend("access.lamp".into(), vec![json!(5)]),
-            None,
-        )
-        .await
-        .unwrap();
-        let screen = render(&panel, &bot, &Page::Setting(access.entry("lamp"))).await;
-        assert_eq!(
-            find(&screen, "❌ 5"),
-            Button::Remove(access.entry("lamp"), "5".into())
-        );
-
-        let screen = press(&panel, &bot, find(&screen, "Delete entry")).await;
-        assert!(panel.store.current().config.access.is_empty());
-        assert!(screen.text.contains("No entries yet"), "{}", screen.text);
-    }
-
-    #[tokio::test]
-    async fn known_users_and_chats_are_shown_by_name() {
-        let (panel, bot) = panel().await;
-        for (key, value) in [("admins", json!([7, 8])), ("alerts_chat", json!(-100))] {
-            panel.store.set(key, value, None).await.unwrap();
-        }
-
-        let admins = render(&panel, &bot, &Page::Setting(target(&panel, "admins"))).await;
-        assert!(admins.text.contains("Ann (@ann)"), "{}", admins.text);
-        assert_eq!(
-            find(&admins, "❌ Ann"),
-            Button::Remove(target(&panel, "admins"), "7".into())
-        );
-        find(&admins, "❌ 8");
-
-        let alerts = render(&panel, &bot, &Page::Setting(target(&panel, "alerts_chat"))).await;
-        assert!(alerts.text.contains("Now: Family"), "{}", alerts.text);
-    }
-
-    /// Answers the panel's `ask` question about `key` with typed `text`, and
-    /// applies the result.
-    async fn answer_typed(panel: &SettingsPanel<Toy, Bot>, key: &str, ask: Ask, text: &str) {
-        let target = target(panel, key);
-        let catalog = panel.store.catalog();
-        let setting = Setting::resolve(&catalog, &target).unwrap();
-        let question = Question {
-            target: target.clone(),
-            ask,
-            panel: MessageId(1),
-        };
-        let message = crate::prompts::tests::text(text);
-        let snapshot = panel.store.current();
-        let (edit, _) = input::read(panel, &snapshot, &setting, &question, &message)
-            .await
-            .unwrap();
-        edit::apply(&panel.store, edit, Some("1".into()))
-            .await
-            .unwrap();
-    }
-
-    #[tokio::test]
-    async fn references_of_unknown_domains_are_typed_and_listed() {
-        let (panel, bot) = panel().await;
-        // A quoted id stays a string, even when it looks like a number.
-        answer_typed(&panel, "things", Ask::Items, "\"42\" a@b 42").await;
-        assert_eq!(value(&panel, "things"), Some(json!(["42", "a@b", 42])));
-
-        let things = render(&panel, &bot, &Page::Setting(target(&panel, "things"))).await;
-        assert!(things.text.contains("a@b"), "{}", things.text);
-        assert!(things.text.contains("42"), "{}", things.text);
-
-        press(&panel, &bot, find(&things, "❌ a@b")).await;
-        assert_eq!(value(&panel, "things"), Some(json!(["42", 42])));
-
-        // ❌ removes the string, not the number that looks the same.
-        let things = render(&panel, &bot, &Page::Setting(target(&panel, "things"))).await;
-        press(&panel, &bot, find(&things, "❌ 42")).await;
-        assert_eq!(value(&panel, "things"), Some(json!([42])));
-    }
-
-    #[tokio::test]
-    async fn usernames_resolve_through_the_user_domain() {
-        let (panel, _) = panel().await;
-        answer_typed(&panel, "admins", Ask::Items, "@ann").await;
-        assert_eq!(value(&panel, "admins"), Some(json!([7])));
-    }
-
-    #[tokio::test]
-    async fn forms_are_edited_field_by_field() {
-        let (panel, bot) = panel().await;
-        let presets = target(&panel, "features.lamp.presets");
-        panel
-            .store
-            .set(
-                "features.lamp.presets.night",
-                json!({ "brightness": 10, "white": "warm" }),
-                None,
-            )
-            .await
-            .unwrap();
-        let night = presets.entry("night");
-        let preset = |panel: &SettingsPanel<Toy, Bot>| value(panel, "features.lamp.presets.night");
-
-        let screen = render(&panel, &bot, &Page::Setting(night.clone())).await;
-        find(&screen, "Brightness: 10% ›");
-
-        // A suggested number.
-        let brightness = render(&panel, &bot, &Page::Setting(night.field(0))).await;
-        press(&panel, &bot, find(&brightness, "50%")).await;
-        assert_eq!(
-            preset(&panel),
-            Some(json!({ "brightness": 50, "white": "warm" }))
-        );
-
-        // Fields of a group exclude each other.
-        let colour = render(&panel, &bot, &Page::Setting(night.field(2))).await;
-        assert!(colour.text.contains("clears White"), "{}", colour.text);
-        press(&panel, &bot, find(&colour, "red")).await;
-        assert_eq!(
-            preset(&panel),
-            Some(json!({ "brightness": 50, "color": "red" }))
-        );
-
-        // Fields are cleared with 🚫 None.
-        let colour = render(&panel, &bot, &Page::Setting(night.field(2))).await;
-        press(&panel, &bot, find(&colour, "None")).await;
-        assert_eq!(preset(&panel), Some(json!({ "brightness": 50 })));
-    }
 
     #[test]
     fn buttons_can_post_pages_from_elsewhere() {
@@ -695,23 +383,71 @@ mod tests {
         let InlineKeyboardButtonKind::CallbackData(data) = &button.kind else {
             panic!()
         };
+        let token = data.strip_prefix(PREFIX).unwrap();
         assert_eq!(
-            Button::parse(PREFIX, data),
-            Some(Button::Post(Page::Section("lamp".into())))
+            Action::parse(token),
+            Some(Action::Post(Page::Section("lamp".into())))
         );
-        assert_eq!(Button::parse("other:", data), None);
+        assert!(data.strip_prefix("other:").is_none());
     }
 
     #[tokio::test]
-    async fn clearing_an_optional_text() {
+    async fn picked_users_are_remembered() {
+        let names = FakeNames::default();
+        let remembered = Arc::clone(&names.remembered);
+        let (panel, _) = panel().await;
+        let panel = SettingsPanel::new(Arc::clone(panel.store()), Default::default()).names(names);
+
+        let shared = message(json!({
+            "users_shared": { "request_id": 1, "users": [{ "user_id": 8 }] }
+        }));
+        remember_picked(&panel, &shared).await;
+        assert_eq!(*remembered.lock().unwrap(), [UserId(8)]);
+    }
+
+    #[tokio::test]
+    async fn screens_are_drawn_with_the_prefix_and_html() {
         let (panel, bot) = panel().await;
-        let greeting = target(&panel, "greeting");
+        let limits = panel.limits();
+        let names = panel.bot_names(&bot);
+        let viewer = Viewer {
+            names: names
+                .as_ref()
+                .map(|names| names as &dyn botconf_panel::Names),
+            ..Viewer::new(&limits)
+        };
         panel
-            .store
-            .set("greeting", json!("hi"), None)
+            .store()
+            .set("admins", json!([7]), Some("1".into()))
             .await
             .unwrap();
-        press(&panel, &bot, Button::Clear(greeting)).await;
-        assert_eq!(panel.store.current().config.greeting, None);
+        let catalog = panel.store().catalog();
+        let admins = catalog
+            .live()
+            .find(|(_, entry)| entry.key == "admins")
+            .unwrap()
+            .0;
+        let screen = panel
+            .panel
+            .render(&Page::Setting(Target::setting(admins)), &viewer)
+            .await;
+        let (text, keyboard) = render::message(PREFIX, &screen);
+        assert!(text.starts_with("<b>Admins</b>\n<i>"), "{text}");
+        assert!(text.contains("Ann (@ann) — <code>7</code>"), "{text}");
+        assert!(text.contains("changed from Telegram"), "{text}");
+        let data: Vec<_> = keyboard
+            .inline_keyboard
+            .iter()
+            .flatten()
+            .map(|button| match &button.kind {
+                InlineKeyboardButtonKind::CallbackData(data) => data.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert!(
+            data.iter()
+                .all(|data| data.starts_with(PREFIX) && data.len() <= 64)
+        );
+        assert!(data.contains(&format!("{PREFIX}r:{admins}:7")), "{data:?}");
     }
 }
