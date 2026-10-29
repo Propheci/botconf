@@ -42,6 +42,8 @@
         packages = [
           nightlyRustfmt
           pkgs.taplo
+          # `botconf-grpc`'s build script compiles `proto/` with it.
+          pkgs.protobuf
         ];
       };
     }

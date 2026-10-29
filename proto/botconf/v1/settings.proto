@@ -1,0 +1,538 @@
+syntax = "proto3";
+
+package botconf.v1;
+
+option go_package = "github.com/propheci/botconf/go/settingspb;settingspb";
+
+// A program's runtime settings: the keys that can change while it runs,
+// their values (config file < environment < stored overrides), and a
+// settings panel to show to people.
+//
+// Authorization is the host's. Every request may carry the actor it acts
+// for, as the client claims it; the host decides whether to trust the claim
+// (e.g. from the connection's credentials) and who to record as the author
+// of changes.
+//
+// Values travel as JSON text. A value someone typed is sent as typed: the
+// server reads it as JSON when it parses (`42`, `[1, 2]`, `"text"`), and as
+// plain text otherwise.
+service Settings {
+  // The runtime settings with their kinds, choices resolved now. Describe
+  // again after a `WatchEvent` with `catalog_changed`.
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+  // Every runtime setting's value and source, the overrides of single map
+  // entries, and the stored values that are not applied.
+  rpc List(ListRequest) returns (ListResponse);
+  // One key's value and source.
+  rpc Get(GetRequest) returns (ValueEntry);
+  // Overrides a key with a value.
+  rpc Set(EditRequest) returns (ChangeResponse);
+  // Removes the override of a key (and of its entries): the key goes back to
+  // the config file's value.
+  rpc Unset(UnsetRequest) returns (ChangeResponse);
+  // Appends an item to a list setting, unless it is there already.
+  rpc Add(EditRequest) returns (ChangeResponse);
+  // Removes every occurrence of an item from a list setting.
+  rpc Remove(EditRequest) returns (ChangeResponse);
+  // Re-reads the config file, the environment and the stored overrides.
+  rpc Reload(ReloadRequest) returns (ChangeResponse);
+  // A page of the settings panel.
+  rpc Render(RenderRequest) returns (RenderResponse);
+  // Presses a button of the panel, answers one of its questions, or runs the
+  // text form of the settings command.
+  rpc Act(ActRequest) returns (ActResponse);
+  // The values under some keys now, then every change to them, until the
+  // client goes away.
+  rpc Watch(WatchRequest) returns (stream WatchEvent);
+}
+
+// Who a request acts for, as the client claims it: e.g. the Telegram user
+// who pressed a button. The host's authorizer decides whether to trust it.
+message Actor {
+  // What kind of id `id` is, e.g. `telegram.user`.
+  string domain = 1;
+  // The id within the domain, e.g. `123456789`.
+  string id = 2;
+}
+
+// ---- descriptors ----
+
+// Asks for the runtime settings and their kinds.
+message DescribeRequest {
+  // Who asks.
+  Actor actor = 1;
+}
+
+// The runtime settings, in catalog order, and the sections they belong to.
+message DescribeResponse {
+  // Every runtime setting that exists now.
+  repeated SettingDescriptor settings = 1;
+  // The schema's sections, then the sections registered at runtime.
+  repeated SectionDescriptor sections = 2;
+}
+
+// A typed part of the configuration, e.g. one feature or one connector.
+message SectionDescriptor {
+  // Unique among sections, e.g. `lights` or `connector:telegram-1`.
+  string id = 1;
+  // Where it is in the configuration, e.g. `modules.lights`.
+  string path = 2;
+  // A human friendly name.
+  string title = 3;
+  // What the section is for.
+  string description = 4;
+  // Whether it was registered while the program runs (and may go away).
+  bool dynamic = 5;
+}
+
+// A key that can change at runtime.
+message SettingDescriptor {
+  // The setting's position in the catalog. It never changes while the
+  // program runs, and a removed setting's position is never reused.
+  uint32 position = 1;
+  // The absolute dotted key, e.g. `logging.filter`.
+  string key = 2;
+  // A short name, e.g. `Logging`.
+  string title = 3;
+  // What it controls.
+  string description = 4;
+  // Whether the entries of this map-valued setting can be set one by one,
+  // as `<key>.<entry>`.
+  bool per_entry = 5;
+  // How the value is edited.
+  Kind kind = 6;
+  // The id of the section that declared it; empty for top-level settings.
+  string section = 7;
+}
+
+// A value a setting can take, with its label.
+message Choice {
+  // The value, as stored (a string; numbers for number suggestions).
+  string value = 1;
+  // How to show it, e.g. `🌅 warm`.
+  string label = 2;
+}
+
+// The shape of a setting's value, so that a front end can offer a fitting
+// editor. Only a hint: every value is validated by the server.
+message Kind {
+  // One of the kinds below.
+  oneof kind {
+    // Any value, typed as JSON (or plain text).
+    JsonKind json = 1;
+    // Text, taken as typed.
+    TextKind text = 2;
+    // A whole number in a range.
+    NumberKind number = 3;
+    // One of some choices.
+    OneOfKind one_of = 4;
+    // A list of some of some choices, toggled on and off.
+    SetOfKind set_of = 5;
+    // References to things outside the configuration (users, chats, ...).
+    RefKind ref = 6;
+    // An object edited field by field.
+    FormKind form = 7;
+    // A map of named entries, set one by one.
+    MapKind map = 8;
+  }
+}
+
+// Any value, typed as JSON (or plain text).
+message JsonKind {}
+
+// Text, taken as typed.
+message TextKind {
+  // Whether it can be cleared (set to null).
+  bool optional = 1;
+}
+
+// A whole number between `min` and `max`.
+message NumberKind {
+  // The smallest value allowed.
+  int64 min = 1;
+  // The largest value allowed.
+  int64 max = 2;
+  // Shown after the number, e.g. `%`.
+  string unit = 3;
+  // The values offered as buttons; others can be typed in.
+  repeated int64 suggestions = 4;
+  // Whether it can be cleared (set to null).
+  bool optional = 5;
+}
+
+// One of `choices`.
+message OneOfKind {
+  // The choices, resolved against the current configuration.
+  repeated Choice choices = 1;
+  // Whether other values can be typed in.
+  bool custom = 2;
+  // Whether it can be cleared (set to null).
+  bool optional = 3;
+}
+
+// A list of some of `choices`.
+message SetOfKind {
+  // The choices, resolved against the current configuration.
+  repeated Choice choices = 1;
+  // Whether being listed means "off" (e.g. a list of disabled features).
+  bool inverted = 2;
+}
+
+// References: ids the configuration does not interpret.
+message RefKind {
+  // What they refer to, e.g. `telegram.user` or `wuphf.chat`, so a front
+  // end knows how to pick and name them.
+  string domain = 1;
+  // A list of references, rather than one.
+  bool many = 2;
+}
+
+// A field of a form.
+message FormField {
+  // The key in the object.
+  string key = 1;
+  // A short name.
+  string title = 2;
+  // How the field is edited.
+  Kind kind = 3;
+  // Fields of the same group exclude each other: setting one clears the
+  // others. Empty for no group.
+  string group = 4;
+}
+
+// An object whose fields are edited one by one.
+message FormKind {
+  // The fields, in order.
+  repeated FormField fields = 1;
+  // The value of a new entry, as JSON, e.g. `{"brightness": 100}`.
+  string initial_json = 2;
+}
+
+// A map of named entries.
+message MapKind {
+  // Whether entry names are limited to `names`.
+  bool limited_names = 1;
+  // The names entries may have, when limited, resolved now.
+  repeated Choice names = 2;
+  // The kind of each entry's value.
+  Kind value = 3;
+}
+
+// ---- values ----
+
+// Where the effective value of a key comes from.
+enum Source {
+  // Not set by the server.
+  SOURCE_UNSPECIFIED = 0;
+  // Not set anywhere: the built-in default.
+  SOURCE_DEFAULT = 1;
+  // The config file.
+  SOURCE_FILE = 2;
+  // An environment variable.
+  SOURCE_ENVIRONMENT = 3;
+  // A runtime override, stored by the server.
+  SOURCE_STORED = 4;
+  // Somewhere else, named in `source_name` (e.g. a connector's own file).
+  SOURCE_OTHER = 5;
+}
+
+// One key with its effective value.
+message ValueEntry {
+  // The dotted key.
+  string key = 1;
+  // The value as JSON; unset when the key has no value at all (e.g. a map
+  // entry that does not exist).
+  optional string value_json = 2;
+  // Where the value comes from.
+  Source source = 3;
+  // For SOURCE_OTHER, where, e.g. `connector telegram-1`; empty otherwise.
+  string source_name = 4;
+  // What the setting controls, when the response describes it.
+  string description = 5;
+}
+
+// Asks for every runtime setting's value.
+message ListRequest {
+  // Who asks.
+  Actor actor = 1;
+}
+
+// Every runtime setting's value, and what is stored but not applied.
+message ListResponse {
+  // One entry per runtime setting, in catalog order.
+  repeated ValueEntry settings = 1;
+  // The overrides of single entries of map-valued settings.
+  repeated ValueEntry entries = 2;
+  // Stored values that are not applied because they are invalid.
+  repeated Ignored ignored = 3;
+  // Stored values waiting for their section to register.
+  repeated ValueEntry parked = 4;
+}
+
+// A stored value that is not applied.
+message Ignored {
+  // The dotted key it is stored under.
+  string key = 1;
+  // Why it is not applied.
+  string reason = 2;
+}
+
+// Asks for one key's value.
+message GetRequest {
+  // Who asks.
+  Actor actor = 1;
+  // The dotted key: a runtime setting, or one entry of a map-valued one.
+  string key = 2;
+}
+
+// Changes a key: Set, Add and Remove.
+message EditRequest {
+  // Who changes it; recorded as the author if the host trusts it.
+  Actor actor = 1;
+  // The dotted key.
+  string key = 2;
+  // The value (Set) or the item (Add, Remove), read like typed input: JSON
+  // if it parses, otherwise text.
+  string value = 3;
+}
+
+// Removes the override of a key.
+message UnsetRequest {
+  // Who changes it.
+  Actor actor = 1;
+  // The dotted key.
+  string key = 2;
+}
+
+// Re-reads every source.
+message ReloadRequest {
+  // Who asks.
+  Actor actor = 1;
+}
+
+// The outcome of a change.
+message ChangeResponse {
+  // False when nothing changed: Unset of a key that was not overridden.
+  bool changed = 1;
+  // The key's value before, as JSON (Set, Unset, Add, Remove).
+  optional string previous_json = 2;
+  // The key's value now (Set, Unset, Add, Remove).
+  ValueEntry current = 3;
+  // Settings that are valid but have no effect.
+  repeated string lints = 4;
+  // Reload only: how many stored overrides apply.
+  uint32 overrides = 5;
+  // Reload only: how many stored overrides are ignored.
+  uint32 ignored = 6;
+}
+
+// ---- panel ----
+
+// What the client can display. Screens and tokens are made to fit.
+message Limits {
+  // The longest token a button can carry, in bytes (64 on Telegram).
+  uint32 token_bytes = 1;
+  // The longest message, in characters.
+  uint32 text_chars = 2;
+  // The most rows of buttons a message can have; 0 for no limit. Longer
+  // screens are cut into parts with ◀ / ▶ buttons.
+  uint32 max_rows = 3;
+  // The most buttons in a row; longer rows are split. 0 means 8.
+  uint32 max_per_row = 4;
+}
+
+// How a span of text is shown.
+enum Style {
+  // As is.
+  STYLE_PLAIN = 0;
+  // Bold.
+  STYLE_BOLD = 1;
+  // Italic.
+  STYLE_ITALIC = 2;
+  // Inline code, e.g. a key or an id.
+  STYLE_CODE = 3;
+  // A block of code, e.g. a pretty-printed JSON value.
+  STYLE_CODE_BLOCK = 4;
+}
+
+// A run of text in one style. Lines are separated by `\n`.
+message Span {
+  // How it is shown.
+  Style style = 1;
+  // The text, unescaped: the client turns it into its own markup.
+  string text = 2;
+}
+
+// Formatted text.
+message Text {
+  // The spans, in order.
+  repeated Span spans = 1;
+}
+
+// A button of a screen.
+message Button {
+  // What it says.
+  string label = 1;
+  // Opaque: send it back in `ActRequest.press` when the button is pressed.
+  string token = 2;
+}
+
+// A row of buttons.
+message Row {
+  // The buttons, left to right.
+  repeated Button buttons = 1;
+}
+
+// A message of the panel: what to show, and the buttons under it.
+message Screen {
+  // The message.
+  Text text = 1;
+  // The rows of buttons, top to bottom.
+  repeated Row rows = 2;
+}
+
+// The client's picker to offer with a question (e.g. Telegram's user
+// picker).
+message Picker {
+  // The reference domain to pick from, e.g. `telegram.user`.
+  string domain = 1;
+  // Whether several can be picked.
+  bool many = 2;
+}
+
+// A question to put to the user; the answer goes back in `Answer`.
+message Ask {
+  // Opaque: keep it until the user answers, and send it back in `Answer`.
+  string question = 1;
+  // What to ask; the client adds how to give up (a button, `/cancel`).
+  Text text = 2;
+  // The client's picker to offer, if any; unset: a typed answer only.
+  Picker picker = 3;
+  // The current value, e.g. to copy (it is also in `text`).
+  optional string current = 4;
+  // The setting's title, e.g. as an input placeholder.
+  string title = 5;
+  // Suggested answers, as buttons: pressing one is pressing a panel button.
+  repeated Row rows = 6;
+}
+
+// A page of the panel.
+message Page {
+  // Which page.
+  oneof page {
+    // The home screen: the core settings and a button per section.
+    HomePage home = 1;
+    // The settings of one section, by its id.
+    string section = 2;
+  }
+}
+
+// The home screen.
+message HomePage {}
+
+// Asks for a page of the panel.
+message RenderRequest {
+  // Who is looking.
+  Actor actor = 1;
+  // Which page; unset means the home screen.
+  Page page = 2;
+  // What the client can display.
+  Limits limits = 3;
+  // Whether the client can show its pickers in this conversation.
+  bool pickers = 4;
+}
+
+// A page of the panel.
+message RenderResponse {
+  // The page, to show as a new message.
+  Screen screen = 1;
+}
+
+// An answer to a question of the panel.
+message Answer {
+  // The question, as `Ask.question` gave it.
+  string question = 1;
+  // What the user gave.
+  oneof input {
+    // Typed text.
+    string text = 2;
+    // Ids picked with the client's picker.
+    Picked picked = 3;
+    // The user gave up.
+    Cancel cancel = 4;
+  }
+}
+
+// Ids picked with the client's picker.
+message Picked {
+  // The domain they were picked from, e.g. `telegram.user`.
+  string domain = 1;
+  // Each id as JSON, in the domain's form (e.g. `123456789`).
+  repeated string ids_json = 2;
+}
+
+// The user gave up on a question.
+message Cancel {}
+
+// Something the user did with the panel.
+message ActRequest {
+  // Who did it.
+  Actor actor = 1;
+  // What the client can display, for the screens in the response.
+  Limits limits = 2;
+  // What they did.
+  oneof act {
+    // Pressed a button: its token.
+    string press = 3;
+    // Answered a question.
+    Answer answer = 4;
+    // Ran the text form of the settings command, with these arguments
+    // (empty: open the panel; `help`: the subcommands).
+    string command = 5;
+  }
+  // Whether the client can show its pickers in this conversation.
+  bool pickers = 6;
+}
+
+// What the client should do now. Several fields may be set.
+message ActResponse {
+  // Redraw the panel message with this.
+  optional Screen screen = 1;
+  // Post this as a new message.
+  optional Screen post = 2;
+  // A short notice: a toast, an ephemeral reply.
+  optional string notice = 3;
+  // Ask the user something; keep `ask.question` for the answer.
+  optional Ask ask = 4;
+  // The panel was closed: delete its message, or redraw it with `screen`.
+  bool closed = 5;
+  // The press or answer was refused: show this, and keep the panel as is.
+  optional string rejected = 6;
+  // A text command's reply.
+  optional Text reply = 7;
+  // The button was out of date (e.g. its handle expired): show `notice` and
+  // redraw the panel message with `screen`, like any other reaction.
+  bool stale = 8;
+}
+
+// ---- watch ----
+
+// Asks for the values under some keys, and every change to them.
+message WatchRequest {
+  // Who watches.
+  Actor actor = 1;
+  // Dotted key prefixes, e.g. `connectors.telegram-1`; a key matches a
+  // prefix when it is the prefix or below it. Empty: every key.
+  repeated string prefixes = 2;
+}
+
+// Values under the watched prefixes.
+message WatchEvent {
+  // The first event: every runtime key under the prefixes. Later events:
+  // the keys whose value or source changed.
+  repeated ValueEntry values = 1;
+  // Whether this is the first event.
+  bool initial = 2;
+  // Sections under the prefixes were registered or removed: Describe again.
+  bool catalog_changed = 3;
+}

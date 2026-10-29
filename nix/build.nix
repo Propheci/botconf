@@ -4,6 +4,7 @@
 {
   lib,
   craneLib,
+  protobuf,
   # A toolchain whose rustfmt understands the unstable options of rustfmt.toml.
   fmtToolchain,
 }:
@@ -13,12 +14,18 @@ let
   pname = "botconf";
   version = "0.1.0";
 
-  # Rust sources, TOML files (incl. rustfmt.toml) and Cargo.lock only.
-  src = craneLib.cleanCargoSource ../.;
+  # Rust sources, TOML files (incl. rustfmt.toml), Cargo.lock, and the protos
+  # `botconf-grpc` compiles.
+  src = lib.cleanSourceWith {
+    src = ../.;
+    filter = path: type: (craneLib.filterCargoSources path type) || (lib.hasSuffix ".proto" path);
+    name = "source";
+  };
 
   commonArgs = {
     inherit src pname version;
     strictDeps = true;
+    nativeBuildInputs = [ protobuf ];
   };
 
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
