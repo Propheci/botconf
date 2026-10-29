@@ -35,6 +35,9 @@ jobs:
           - package: botconf-panel
             toolchain: "1.95.0"
             args: --all-features
+          - package: botconf-grpc
+            toolchain: "1.95.0"
+            args: --all-features
           - package: botconf-telegram
             toolchain: "1.96.0"
             args: ""
@@ -43,6 +46,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
+      # botconf-grpc's build script compiles proto/ with protoc. Ubuntu's
+      # protoc (3.21 on 24.04) supports proto3 `optional` fields.
+      - if: matrix.package == 'botconf-grpc'
+        run: sudo apt-get update && sudo apt-get install --yes protobuf-compiler
       # `+toolchain`: rust-toolchain.toml pins the dev toolchain, which would
       # otherwise win over the toolchain installed above.
       - run: cargo +${{ matrix.toolchain }} test --locked -p ${{ matrix.package }} ${{ matrix.args }}

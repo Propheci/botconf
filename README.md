@@ -24,6 +24,7 @@ with buttons, a command line, or a remote client.
 rust/      the Rust crates
   botconf/            the core: schema, layering, store, storage, commands
   botconf-panel/      the settings panel engine: screens, buttons, answers
+  botconf-grpc/       the botconf.v1.Settings gRPC service (tonic)
   botconf-telegram/   a Telegram (teloxide) front end for the panel
 proto/     the wire contract (botconf.v1.Settings), shared by Rust and Go
 go/        the Go module: a client for remote settings and panel renderers
@@ -36,14 +37,14 @@ The Rust crates live in `rust/`. They moved here from
 [assistant_bot_rs](https://github.com/akshettrj/assistant_bot_rs) with their
 history ([plan 001](plans/001-extract-crates.md)); their earlier life inside
 that bot's `src/settings/` stays in its repository. The panel engine
-(`botconf-panel`) landed in plan 004; the remote settings service and the Go
-SDK follow in plans 005–007.
+(`botconf-panel`) landed in plan 004 and the gRPC service (`botconf-grpc`) in
+plan 005; the Go SDK follows in plans 006 and 007.
 [`plans/README.md`](plans/README.md) has the order and the status of each.
 
 Develop inside the Nix dev shell (`nix develop`, or `direnv allow`), which
 provides the toolchain, a nightly rustfmt (`rustfmt.toml` uses unstable
-options) and taplo. `nix flake check` runs clippy, the tests and the format
-checks, as CI does.
+options), taplo and protoc (`botconf-grpc` compiles `proto/`).
+`nix flake check` runs clippy, the tests and the format checks, as CI does.
 
 ## Using it
 
@@ -54,18 +55,21 @@ not from crates.io or a Go proxy release:
 # Cargo.toml
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
 # SeaORM) and `cli` (a clap subcommand to view and change the settings).
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.4.0", features = ["cli", "sea-orm"] }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.5.0", features = ["cli", "sea-orm"] }
 # The settings panel engine, for writing a front end. Feature: `sea-orm`
 # (keep the handles of long buttons in a SQL table).
-botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.4.0" }
+botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.5.0" }
 # A Telegram settings panel (teloxide) over a botconf store, drawn by the
 # engine. Feature: `sea-orm` (as above).
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.4.0", features = ["sea-orm"] }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.5.0", features = ["sea-orm"] }
+# The gRPC service (tonic 0.12) serving a store and its panel to remote
+# clients. Building it needs `protoc` on the PATH.
+botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.5.0" }
 ```
 
-Minimum Rust: 1.95 for `botconf` and `botconf-panel`, 1.96 for
-`botconf-telegram` (its teloxide
-pulls in takecell 0.1.2, which declares 1.96). The dependency requirements
+Minimum Rust: 1.95 for `botconf`, `botconf-panel` and `botconf-grpc`, 1.96
+for `botconf-telegram` (its teloxide pulls in takecell 0.1.2, which declares
+1.96). The dependency requirements
 are floors, and botconf turns on only the features it uses, so a host keeps
 its own lock file; for example, enable serde_json's `preserve_order` in the
 host if you want JSON objects to keep their written order.
@@ -232,6 +236,57 @@ keep them in its database: with the `sea-orm` feature, create the table in a
 migration with `create_tokens_table(DEFAULT_TOKENS_TABLE)` (`key`, `action`,
 `expires_at` in milliseconds) and pass `SeaOrmTokenStore` to
 `Panel::token_store`, or implement `TokenStore` over the host's own storage.
+
+### Serving settings over gRPC
+
+`botconf-grpc` serves a store and its panel as the `botconf.v1.Settings`
+service ([`proto/botconf/v1/settings.proto`](proto/botconf/v1/settings.proto)),
+so programs in other languages, other processes, or a host's own connectors
+can read the settings, change them, watch them and show the panel:
+
+| RPC | What it does |
+|---|---|
+| `Describe` | The runtime settings and their kinds, with every list of choices resolved now; the sections, those registered at runtime marked `dynamic` |
+| `List`, `Get` | Values, as JSON text, with where each comes from |
+| `Set`, `Unset`, `Add`, `Remove` | Change a key, like the text commands; values are read like typed input (JSON if it parses, text otherwise) |
+| `Reload` | Re-read the config file, the environment and the stored overrides |
+| `Render` | A page of the panel, as a `Screen` |
+| `Act` | Press a button (its token), answer a question, or run a text command; the response is the engine's reaction, and a refused or stale press comes back in it (`rejected`, `stale`) rather than as an error |
+| `Watch` | The values under some key prefixes, then every change to them; `catalog_changed` means sections were registered or removed, so `Describe` again |
+
+A host mounts it next to its other tonic services:
+
+```rust
+let panel = Arc::new(
+    botconf_panel::Panel::new(Arc::clone(&store))
+        .token_store(MyPersistentTokenStore::new(db)) // see "Tokens"
+        .domain(MY_DOMAIN),
+);
+let settings = botconf_grpc::SettingsService::new(panel, MyAuthorizer::new(…))
+    .names(MyNames::new(…)) // names and suggestions for references
+    .on_change(|change| { /* refresh what depends on the settings */ })
+    .into_server();
+Server::builder().add_service(settings) /* … */;
+```
+
+**Authorization is the host's.** Every request carries the actor the client
+claims (`Actor { domain, id }`, e.g. the Telegram user who pressed a button),
+and every RPC first asks the host's `Authorizer` with the request's metadata,
+that actor and the `Operation` it wants: `Describe`, `Read { key }`,
+`Change { key }`, `Reload`, `Panel` (rendering and acting, which can change any
+setting) or `Watch { prefixes }`. The authorizer returns the `Principal` to
+record as the author of changes, or the status to refuse with; a refused
+request touches nothing. There is no default authorizer: refuse what you
+don't recognise. (`AllowAll`, behind the `testing` feature, is for tests.)
+
+The server keeps nothing per client: a question travels to the client in
+`Ask.question` and comes back with the answer, and long buttons' handles are
+in the panel's `TokenStore`. Give the panel a persistent store, so that
+buttons keep working across restarts and for every client.
+
+**tonic versions.** A service is added to the host's tonic server, so the
+host must use the same tonic major version as `botconf-grpc` (tonic 0.12,
+prost 0.13). Upgrading tonic happens here first, then in the hosts.
 
 ### Versions and tags
 

@@ -28,7 +28,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 3 | 003 | `Kind::Ref { domain, many }` replaces the Telegram id kinds; actors become strings | P1 | M | 001, 002 | `v0.2.0` | DONE (see execution notes; the assistant bot moved to `v0.2.0` in its `e6f8e83`) |
 | 4 | 009 | Owned descriptors (`Shared`) and sections registered at runtime | P1 | L | 003 | `v0.3.0` | DONE (see execution notes; the assistant bot moved to `v0.3.0` in its `a815f3b`) |
 | 5 | 004 | Platform-neutral panel engine (`botconf-panel`) with hybrid tokens; botconf-telegram renders it | P1 | L | 003, 009 | `v0.4.0` | DONE (see execution notes; assistant bot branch `botconf-v0.4` pending the owner) |
-| 6 | 005 | `botconf.v1.Settings` gRPC service (`botconf-grpc`) | P1 | L | 004, 009 | `v0.5.0` | TODO |
+| 6 | 005 | `botconf.v1.Settings` gRPC service (`botconf-grpc`) | P1 | L | 004, 009 | `v0.5.0` | DONE (see execution notes) |
 | 7 | 006 | Go module and settings client | P1 | M | 005 | `v0.6.0`, `go/v0.6.0` | TODO |
 | 8 | 007 | Go panel renderers: Telegram bots, Telegram user accounts (inline-bot trick), Discord | P2 | L | 006 | `v0.7.0`, `go/v0.7.0` | TODO |
 | 9 | 008 | SPIKE (roadmap): a Go port of the store | P3 | M | 005, 006, 009 | — | TODO |
@@ -352,3 +352,45 @@ each is marked in its plan):
     passes (312), clippy and rustfmt are clean, and `migrate` on a copy of
     the bot's SQLite file created the table. The test of the earlier actor
     migration found it by position from the end; it now finds it by name.
+- **005 done 2026-10-29** (tag `v0.5.0`). `proto/botconf/v1/settings.proto`
+  defines the service, and `botconf-grpc` serves it with tonic 0.12 and
+  prost 0.13 (one tonic in the tree, as wuphf's). `SettingsStore::subscribe`
+  hands out a `tokio::sync::watch` receiver of published snapshots, which
+  `Watch` streams from. Tests: `botconf-grpc` 28 (the 15 planned service
+  tests, a hook test, 11 mapping tests and a prefix test), passing on rustc
+  1.95 (the wuphf shell's toolchain) and in the dev shell (1.98.1, with
+  the whole workspace: `botconf` 19 + 10 dynamic + 11 store + 1 doc,
+  `botconf-panel` 37, `botconf-telegram` 10); clippy (warnings denied),
+  the nightly rustfmt and taplo are clean, and the proto lints with protoc.
+  The lock file only gained packages. Skipping the authorizer for `Set`
+  (its operation reported as `Panel`), dropping the change hook in `Act`,
+  or not reporting removed keys in `Watch` each makes a test fail; so does
+  not publishing to subscribers. Deviations:
+  - **The proto follows 004 as it landed.** `Ask` carries `title` and the
+    suggestion `rows`; `RenderRequest` and `ActRequest` carry `pickers`;
+    `ChangeResponse` carries the counts of a reload (`overrides`, `ignored`).
+    `Page` is `home` or `section` only: a page by token would need the
+    engine to redeem handles outside a press, and a client opens a token's
+    page by pressing it.
+  - **Limits default to Telegram's.** Fields a client leaves at zero (or no
+    `Limits` at all) mean 64-byte tokens, 4096 characters and 8 buttons a
+    row; `max_rows` 0 means no limit.
+  - **The host names references.** `SettingsService::names` takes the
+    host's `Names` (e.g. wuphf's chat titles), since names come from the
+    host, not the client; the `Panel` holds the domains and the token store.
+  - **`on_change` hears every change made through the service**: setters,
+    `Reload`, panel presses and answers, and text commands.
+  - **A text command with no arguments** answers with the panel in `post`
+    (a new message), like the engine's `CommandReply::Panel`.
+  - **Unset of nothing** answers `changed: false` with the key's current
+    value, so a client can show it.
+  - **`Watch` with no prefixes** watches every key, and a key whose section
+    was removed comes back with no value (and `catalog_changed`).
+  - **`#![allow(clippy::result_large_err)]`** in `botconf-grpc`: handlers and
+    the authorizer answer with `tonic::Status`, as wuphf's do.
+  - **Nix and CI:** the dev shell and the checks get protoc; the checks'
+    source keeps `.proto` files (`cleanCargoSource` dropped them); the
+    `msrv` job installs Ubuntu's protoc for `botconf-grpc` on 1.95.
+  - **Crate versions** are `0.5.0`, matching the tag.
+  - **Skipped:** `nix flake check` (CI runs it on the pushed commits) and
+    the 1.96 job for `botconf-telegram`.
