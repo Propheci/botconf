@@ -30,3 +30,7 @@ futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "test-util"] }
 tokio-stream = { workspace = true, features = ["net"] }
+
+[[example]]
+name = "toy_server"
+required-features = ["testing"]
