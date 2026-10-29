@@ -1,0 +1,32 @@
+[package]
+name = "botconf-grpc"
+description = "Serves botconf settings and the settings panel over gRPC (botconf.v1.Settings)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+## `AllowAll`, an authorizer that lets every request through, for tests.
+testing = []
+
+[dependencies]
+botconf = { workspace = true }
+botconf-panel = { workspace = true }
+prost = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }
+tokio-stream = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+
+[dev-dependencies]
+figment = { workspace = true, features = ["toml"] }
+futures = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "test-util"] }
+tokio-stream = { workspace = true, features = ["net"] }

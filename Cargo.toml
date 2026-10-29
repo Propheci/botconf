@@ -46,3 +46,11 @@ teloxide = { version = "0.17.0", default-features = false, features = [
 thiserror = "2.0.18"
 tokio = "1.39"
 tracing = "0.1.40"
+
+# botconf-grpc's services are added to the host's tonic server, so tonic's
+# major version must be the host's (wuphf: tonic 0.12, prost 0.13). Upgrading
+# it is a coordinated change: botconf first, then the hosts.
+prost = "0.13"
+tokio-stream = "0.1"
+tonic = "0.12"
+tonic-build = "0.12"
