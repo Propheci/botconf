@@ -44,6 +44,12 @@
           pkgs.taplo
           # `botconf-grpc`'s build script compiles `proto/` with it.
           pkgs.protobuf
+          # The Go module (`go/`) and `scripts/gen-go.sh`. The committed
+          # bindings come from protoc-gen-go 1.36.11 and protoc-gen-go-grpc
+          # 1.6.2 (wuphf's versions); CI installs exactly those.
+          pkgs.go
+          pkgs.protoc-gen-go
+          pkgs.protoc-gen-go-grpc
         ];
       };
     }
