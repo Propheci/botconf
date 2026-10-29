@@ -1084,7 +1084,13 @@ type FormField struct {
 	Kind *Kind `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
 	// Fields of the same group exclude each other: setting one clears the
 	// others. Empty for no group.
-	Group         string `protobuf:"bytes,4,opt,name=group,proto3" json:"group,omitempty"`
+	Group string `protobuf:"bytes,4,opt,name=group,proto3" json:"group,omitempty"`
+	// Whether the value is incomplete without this field (the panel's drafts
+	// ask for it before offering to save).
+	Required bool `protobuf:"varint,5,opt,name=required,proto3" json:"required,omitempty"`
+	// When set, the field applies only while another field holds a value;
+	// otherwise it is hidden, and dropped when that field changes.
+	When          *FieldCondition `protobuf:"bytes,6,opt,name=when,proto3" json:"when,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1147,6 +1153,75 @@ func (x *FormField) GetGroup() string {
 	return ""
 }
 
+func (x *FormField) GetRequired() bool {
+	if x != nil {
+		return x.Required
+	}
+	return false
+}
+
+func (x *FormField) GetWhen() *FieldCondition {
+	if x != nil {
+		return x.When
+	}
+	return nil
+}
+
+// The condition of a form field that applies only sometimes.
+type FieldCondition struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The key of the field the condition reads.
+	Key string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	// The string that field must hold.
+	Value         string `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FieldCondition) Reset() {
+	*x = FieldCondition{}
+	mi := &file_botconf_v1_settings_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FieldCondition) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FieldCondition) ProtoMessage() {}
+
+func (x *FieldCondition) ProtoReflect() protoreflect.Message {
+	mi := &file_botconf_v1_settings_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FieldCondition.ProtoReflect.Descriptor instead.
+func (*FieldCondition) Descriptor() ([]byte, []int) {
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *FieldCondition) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *FieldCondition) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
 // An object whose fields are edited one by one.
 type FormKind struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1160,7 +1235,7 @@ type FormKind struct {
 
 func (x *FormKind) Reset() {
 	*x = FormKind{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[14]
+	mi := &file_botconf_v1_settings_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1172,7 +1247,7 @@ func (x *FormKind) String() string {
 func (*FormKind) ProtoMessage() {}
 
 func (x *FormKind) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[14]
+	mi := &file_botconf_v1_settings_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1185,7 +1260,7 @@ func (x *FormKind) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FormKind.ProtoReflect.Descriptor instead.
 func (*FormKind) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{14}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *FormKind) GetFields() []*FormField {
@@ -1217,7 +1292,7 @@ type MapKind struct {
 
 func (x *MapKind) Reset() {
 	*x = MapKind{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[15]
+	mi := &file_botconf_v1_settings_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1229,7 +1304,7 @@ func (x *MapKind) String() string {
 func (*MapKind) ProtoMessage() {}
 
 func (x *MapKind) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[15]
+	mi := &file_botconf_v1_settings_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1242,7 +1317,7 @@ func (x *MapKind) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MapKind.ProtoReflect.Descriptor instead.
 func (*MapKind) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{15}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *MapKind) GetLimitedNames() bool {
@@ -1286,7 +1361,7 @@ type ValueEntry struct {
 
 func (x *ValueEntry) Reset() {
 	*x = ValueEntry{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[16]
+	mi := &file_botconf_v1_settings_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1298,7 +1373,7 @@ func (x *ValueEntry) String() string {
 func (*ValueEntry) ProtoMessage() {}
 
 func (x *ValueEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[16]
+	mi := &file_botconf_v1_settings_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1311,7 +1386,7 @@ func (x *ValueEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValueEntry.ProtoReflect.Descriptor instead.
 func (*ValueEntry) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{16}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ValueEntry) GetKey() string {
@@ -1360,7 +1435,7 @@ type ListRequest struct {
 
 func (x *ListRequest) Reset() {
 	*x = ListRequest{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[17]
+	mi := &file_botconf_v1_settings_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1372,7 +1447,7 @@ func (x *ListRequest) String() string {
 func (*ListRequest) ProtoMessage() {}
 
 func (x *ListRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[17]
+	mi := &file_botconf_v1_settings_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1385,7 +1460,7 @@ func (x *ListRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRequest.ProtoReflect.Descriptor instead.
 func (*ListRequest) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{17}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ListRequest) GetActor() *Actor {
@@ -1412,7 +1487,7 @@ type ListResponse struct {
 
 func (x *ListResponse) Reset() {
 	*x = ListResponse{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[18]
+	mi := &file_botconf_v1_settings_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1424,7 +1499,7 @@ func (x *ListResponse) String() string {
 func (*ListResponse) ProtoMessage() {}
 
 func (x *ListResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[18]
+	mi := &file_botconf_v1_settings_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1437,7 +1512,7 @@ func (x *ListResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListResponse.ProtoReflect.Descriptor instead.
 func (*ListResponse) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{18}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *ListResponse) GetSettings() []*ValueEntry {
@@ -1481,7 +1556,7 @@ type Ignored struct {
 
 func (x *Ignored) Reset() {
 	*x = Ignored{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[19]
+	mi := &file_botconf_v1_settings_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1493,7 +1568,7 @@ func (x *Ignored) String() string {
 func (*Ignored) ProtoMessage() {}
 
 func (x *Ignored) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[19]
+	mi := &file_botconf_v1_settings_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1506,7 +1581,7 @@ func (x *Ignored) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ignored.ProtoReflect.Descriptor instead.
 func (*Ignored) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{19}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *Ignored) GetKey() string {
@@ -1536,7 +1611,7 @@ type GetRequest struct {
 
 func (x *GetRequest) Reset() {
 	*x = GetRequest{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[20]
+	mi := &file_botconf_v1_settings_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1548,7 +1623,7 @@ func (x *GetRequest) String() string {
 func (*GetRequest) ProtoMessage() {}
 
 func (x *GetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[20]
+	mi := &file_botconf_v1_settings_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1561,7 +1636,7 @@ func (x *GetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRequest.ProtoReflect.Descriptor instead.
 func (*GetRequest) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{20}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *GetRequest) GetActor() *Actor {
@@ -1594,7 +1669,7 @@ type EditRequest struct {
 
 func (x *EditRequest) Reset() {
 	*x = EditRequest{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[21]
+	mi := &file_botconf_v1_settings_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1606,7 +1681,7 @@ func (x *EditRequest) String() string {
 func (*EditRequest) ProtoMessage() {}
 
 func (x *EditRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[21]
+	mi := &file_botconf_v1_settings_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1619,7 +1694,7 @@ func (x *EditRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EditRequest.ProtoReflect.Descriptor instead.
 func (*EditRequest) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{21}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *EditRequest) GetActor() *Actor {
@@ -1656,7 +1731,7 @@ type UnsetRequest struct {
 
 func (x *UnsetRequest) Reset() {
 	*x = UnsetRequest{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[22]
+	mi := &file_botconf_v1_settings_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1668,7 +1743,7 @@ func (x *UnsetRequest) String() string {
 func (*UnsetRequest) ProtoMessage() {}
 
 func (x *UnsetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[22]
+	mi := &file_botconf_v1_settings_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1681,7 +1756,7 @@ func (x *UnsetRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnsetRequest.ProtoReflect.Descriptor instead.
 func (*UnsetRequest) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{22}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *UnsetRequest) GetActor() *Actor {
@@ -1709,7 +1784,7 @@ type ReloadRequest struct {
 
 func (x *ReloadRequest) Reset() {
 	*x = ReloadRequest{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[23]
+	mi := &file_botconf_v1_settings_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1721,7 +1796,7 @@ func (x *ReloadRequest) String() string {
 func (*ReloadRequest) ProtoMessage() {}
 
 func (x *ReloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[23]
+	mi := &file_botconf_v1_settings_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1734,7 +1809,7 @@ func (x *ReloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReloadRequest.ProtoReflect.Descriptor instead.
 func (*ReloadRequest) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{23}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ReloadRequest) GetActor() *Actor {
@@ -1765,7 +1840,7 @@ type ChangeResponse struct {
 
 func (x *ChangeResponse) Reset() {
 	*x = ChangeResponse{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[24]
+	mi := &file_botconf_v1_settings_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1777,7 +1852,7 @@ func (x *ChangeResponse) String() string {
 func (*ChangeResponse) ProtoMessage() {}
 
 func (x *ChangeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[24]
+	mi := &file_botconf_v1_settings_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1790,7 +1865,7 @@ func (x *ChangeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChangeResponse.ProtoReflect.Descriptor instead.
 func (*ChangeResponse) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{24}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ChangeResponse) GetChanged() bool {
@@ -1853,7 +1928,7 @@ type Limits struct {
 
 func (x *Limits) Reset() {
 	*x = Limits{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[25]
+	mi := &file_botconf_v1_settings_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1865,7 +1940,7 @@ func (x *Limits) String() string {
 func (*Limits) ProtoMessage() {}
 
 func (x *Limits) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[25]
+	mi := &file_botconf_v1_settings_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1878,7 +1953,7 @@ func (x *Limits) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Limits.ProtoReflect.Descriptor instead.
 func (*Limits) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{25}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *Limits) GetTokenBytes() uint32 {
@@ -1922,7 +1997,7 @@ type Span struct {
 
 func (x *Span) Reset() {
 	*x = Span{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[26]
+	mi := &file_botconf_v1_settings_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1934,7 +2009,7 @@ func (x *Span) String() string {
 func (*Span) ProtoMessage() {}
 
 func (x *Span) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[26]
+	mi := &file_botconf_v1_settings_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1947,7 +2022,7 @@ func (x *Span) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Span.ProtoReflect.Descriptor instead.
 func (*Span) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{26}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *Span) GetStyle() Style {
@@ -1975,7 +2050,7 @@ type Text struct {
 
 func (x *Text) Reset() {
 	*x = Text{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[27]
+	mi := &file_botconf_v1_settings_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1987,7 +2062,7 @@ func (x *Text) String() string {
 func (*Text) ProtoMessage() {}
 
 func (x *Text) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[27]
+	mi := &file_botconf_v1_settings_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2000,7 +2075,7 @@ func (x *Text) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Text.ProtoReflect.Descriptor instead.
 func (*Text) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{27}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *Text) GetSpans() []*Span {
@@ -2023,7 +2098,7 @@ type Button struct {
 
 func (x *Button) Reset() {
 	*x = Button{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[28]
+	mi := &file_botconf_v1_settings_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2035,7 +2110,7 @@ func (x *Button) String() string {
 func (*Button) ProtoMessage() {}
 
 func (x *Button) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[28]
+	mi := &file_botconf_v1_settings_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2048,7 +2123,7 @@ func (x *Button) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Button.ProtoReflect.Descriptor instead.
 func (*Button) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{28}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *Button) GetLabel() string {
@@ -2076,7 +2151,7 @@ type Row struct {
 
 func (x *Row) Reset() {
 	*x = Row{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[29]
+	mi := &file_botconf_v1_settings_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2088,7 +2163,7 @@ func (x *Row) String() string {
 func (*Row) ProtoMessage() {}
 
 func (x *Row) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[29]
+	mi := &file_botconf_v1_settings_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2101,7 +2176,7 @@ func (x *Row) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Row.ProtoReflect.Descriptor instead.
 func (*Row) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{29}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *Row) GetButtons() []*Button {
@@ -2124,7 +2199,7 @@ type Screen struct {
 
 func (x *Screen) Reset() {
 	*x = Screen{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[30]
+	mi := &file_botconf_v1_settings_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2136,7 +2211,7 @@ func (x *Screen) String() string {
 func (*Screen) ProtoMessage() {}
 
 func (x *Screen) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[30]
+	mi := &file_botconf_v1_settings_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2149,7 +2224,7 @@ func (x *Screen) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Screen.ProtoReflect.Descriptor instead.
 func (*Screen) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{30}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *Screen) GetText() *Text {
@@ -2180,7 +2255,7 @@ type Picker struct {
 
 func (x *Picker) Reset() {
 	*x = Picker{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[31]
+	mi := &file_botconf_v1_settings_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2192,7 +2267,7 @@ func (x *Picker) String() string {
 func (*Picker) ProtoMessage() {}
 
 func (x *Picker) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[31]
+	mi := &file_botconf_v1_settings_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2205,7 +2280,7 @@ func (x *Picker) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Picker.ProtoReflect.Descriptor instead.
 func (*Picker) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{31}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *Picker) GetDomain() string {
@@ -2243,7 +2318,7 @@ type Ask struct {
 
 func (x *Ask) Reset() {
 	*x = Ask{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[32]
+	mi := &file_botconf_v1_settings_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2255,7 +2330,7 @@ func (x *Ask) String() string {
 func (*Ask) ProtoMessage() {}
 
 func (x *Ask) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[32]
+	mi := &file_botconf_v1_settings_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2268,7 +2343,7 @@ func (x *Ask) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ask.ProtoReflect.Descriptor instead.
 func (*Ask) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{32}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *Ask) GetQuestion() string {
@@ -2329,7 +2404,7 @@ type Page struct {
 
 func (x *Page) Reset() {
 	*x = Page{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[33]
+	mi := &file_botconf_v1_settings_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2341,7 +2416,7 @@ func (x *Page) String() string {
 func (*Page) ProtoMessage() {}
 
 func (x *Page) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[33]
+	mi := &file_botconf_v1_settings_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2354,7 +2429,7 @@ func (x *Page) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Page.ProtoReflect.Descriptor instead.
 func (*Page) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{33}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *Page) GetPage() isPage_Page {
@@ -2409,7 +2484,7 @@ type HomePage struct {
 
 func (x *HomePage) Reset() {
 	*x = HomePage{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[34]
+	mi := &file_botconf_v1_settings_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2421,7 +2496,7 @@ func (x *HomePage) String() string {
 func (*HomePage) ProtoMessage() {}
 
 func (x *HomePage) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[34]
+	mi := &file_botconf_v1_settings_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2434,7 +2509,7 @@ func (x *HomePage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HomePage.ProtoReflect.Descriptor instead.
 func (*HomePage) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{34}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{35}
 }
 
 // Asks for a page of the panel.
@@ -2454,7 +2529,7 @@ type RenderRequest struct {
 
 func (x *RenderRequest) Reset() {
 	*x = RenderRequest{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[35]
+	mi := &file_botconf_v1_settings_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2466,7 +2541,7 @@ func (x *RenderRequest) String() string {
 func (*RenderRequest) ProtoMessage() {}
 
 func (x *RenderRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[35]
+	mi := &file_botconf_v1_settings_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2479,7 +2554,7 @@ func (x *RenderRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenderRequest.ProtoReflect.Descriptor instead.
 func (*RenderRequest) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{35}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *RenderRequest) GetActor() *Actor {
@@ -2521,7 +2596,7 @@ type RenderResponse struct {
 
 func (x *RenderResponse) Reset() {
 	*x = RenderResponse{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[36]
+	mi := &file_botconf_v1_settings_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2533,7 +2608,7 @@ func (x *RenderResponse) String() string {
 func (*RenderResponse) ProtoMessage() {}
 
 func (x *RenderResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[36]
+	mi := &file_botconf_v1_settings_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2546,7 +2621,7 @@ func (x *RenderResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RenderResponse.ProtoReflect.Descriptor instead.
 func (*RenderResponse) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{36}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *RenderResponse) GetScreen() *Screen {
@@ -2575,7 +2650,7 @@ type Answer struct {
 
 func (x *Answer) Reset() {
 	*x = Answer{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[37]
+	mi := &file_botconf_v1_settings_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2587,7 +2662,7 @@ func (x *Answer) String() string {
 func (*Answer) ProtoMessage() {}
 
 func (x *Answer) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[37]
+	mi := &file_botconf_v1_settings_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2600,7 +2675,7 @@ func (x *Answer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Answer.ProtoReflect.Descriptor instead.
 func (*Answer) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{37}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *Answer) GetQuestion() string {
@@ -2682,7 +2757,7 @@ type Picked struct {
 
 func (x *Picked) Reset() {
 	*x = Picked{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[38]
+	mi := &file_botconf_v1_settings_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2694,7 +2769,7 @@ func (x *Picked) String() string {
 func (*Picked) ProtoMessage() {}
 
 func (x *Picked) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[38]
+	mi := &file_botconf_v1_settings_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2707,7 +2782,7 @@ func (x *Picked) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Picked.ProtoReflect.Descriptor instead.
 func (*Picked) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{38}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *Picked) GetDomain() string {
@@ -2733,7 +2808,7 @@ type Cancel struct {
 
 func (x *Cancel) Reset() {
 	*x = Cancel{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[39]
+	mi := &file_botconf_v1_settings_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2745,7 +2820,7 @@ func (x *Cancel) String() string {
 func (*Cancel) ProtoMessage() {}
 
 func (x *Cancel) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[39]
+	mi := &file_botconf_v1_settings_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2758,7 +2833,7 @@ func (x *Cancel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Cancel.ProtoReflect.Descriptor instead.
 func (*Cancel) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{39}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{40}
 }
 
 // Something the user did with the panel.
@@ -2784,7 +2859,7 @@ type ActRequest struct {
 
 func (x *ActRequest) Reset() {
 	*x = ActRequest{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[40]
+	mi := &file_botconf_v1_settings_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2796,7 +2871,7 @@ func (x *ActRequest) String() string {
 func (*ActRequest) ProtoMessage() {}
 
 func (x *ActRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[40]
+	mi := &file_botconf_v1_settings_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2809,7 +2884,7 @@ func (x *ActRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActRequest.ProtoReflect.Descriptor instead.
 func (*ActRequest) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{40}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *ActRequest) GetActor() *Actor {
@@ -2919,7 +2994,7 @@ type ActResponse struct {
 
 func (x *ActResponse) Reset() {
 	*x = ActResponse{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[41]
+	mi := &file_botconf_v1_settings_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2931,7 +3006,7 @@ func (x *ActResponse) String() string {
 func (*ActResponse) ProtoMessage() {}
 
 func (x *ActResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[41]
+	mi := &file_botconf_v1_settings_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2944,7 +3019,7 @@ func (x *ActResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActResponse.ProtoReflect.Descriptor instead.
 func (*ActResponse) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{41}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ActResponse) GetScreen() *Screen {
@@ -3017,7 +3092,7 @@ type WatchRequest struct {
 
 func (x *WatchRequest) Reset() {
 	*x = WatchRequest{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[42]
+	mi := &file_botconf_v1_settings_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3029,7 +3104,7 @@ func (x *WatchRequest) String() string {
 func (*WatchRequest) ProtoMessage() {}
 
 func (x *WatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[42]
+	mi := &file_botconf_v1_settings_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3042,7 +3117,7 @@ func (x *WatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchRequest.ProtoReflect.Descriptor instead.
 func (*WatchRequest) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{42}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *WatchRequest) GetActor() *Actor {
@@ -3075,7 +3150,7 @@ type WatchEvent struct {
 
 func (x *WatchEvent) Reset() {
 	*x = WatchEvent{}
-	mi := &file_botconf_v1_settings_proto_msgTypes[43]
+	mi := &file_botconf_v1_settings_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3087,7 +3162,7 @@ func (x *WatchEvent) String() string {
 func (*WatchEvent) ProtoMessage() {}
 
 func (x *WatchEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_botconf_v1_settings_proto_msgTypes[43]
+	mi := &file_botconf_v1_settings_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3100,7 +3175,7 @@ func (x *WatchEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchEvent.ProtoReflect.Descriptor instead.
 func (*WatchEvent) Descriptor() ([]byte, []int) {
-	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{43}
+	return file_botconf_v1_settings_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *WatchEvent) GetValues() []*ValueEntry {
@@ -3185,12 +3260,17 @@ const file_botconf_v1_settings_proto_rawDesc = "" +
 	"\binverted\x18\x02 \x01(\bR\binverted\"5\n" +
 	"\aRefKind\x12\x16\n" +
 	"\x06domain\x18\x01 \x01(\tR\x06domain\x12\x12\n" +
-	"\x04many\x18\x02 \x01(\bR\x04many\"o\n" +
+	"\x04many\x18\x02 \x01(\bR\x04many\"\xbb\x01\n" +
 	"\tFormField\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12$\n" +
 	"\x04kind\x18\x03 \x01(\v2\x10.botconf.v1.KindR\x04kind\x12\x14\n" +
-	"\x05group\x18\x04 \x01(\tR\x05group\"\\\n" +
+	"\x05group\x18\x04 \x01(\tR\x05group\x12\x1a\n" +
+	"\brequired\x18\x05 \x01(\bR\brequired\x12.\n" +
+	"\x04when\x18\x06 \x01(\v2\x1a.botconf.v1.FieldConditionR\x04when\"8\n" +
+	"\x0eFieldCondition\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\"\\\n" +
 	"\bFormKind\x12-\n" +
 	"\x06fields\x18\x01 \x03(\v2\x15.botconf.v1.FormFieldR\x06fields\x12!\n" +
 	"\finitial_json\x18\x02 \x01(\tR\vinitialJson\"\x80\x01\n" +
@@ -3367,7 +3447,7 @@ func file_botconf_v1_settings_proto_rawDescGZIP() []byte {
 }
 
 var file_botconf_v1_settings_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_botconf_v1_settings_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
+var file_botconf_v1_settings_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
 var file_botconf_v1_settings_proto_goTypes = []any{
 	(Source)(0),               // 0: botconf.v1.Source
 	(Style)(0),                // 1: botconf.v1.Style
@@ -3385,36 +3465,37 @@ var file_botconf_v1_settings_proto_goTypes = []any{
 	(*SetOfKind)(nil),         // 13: botconf.v1.SetOfKind
 	(*RefKind)(nil),           // 14: botconf.v1.RefKind
 	(*FormField)(nil),         // 15: botconf.v1.FormField
-	(*FormKind)(nil),          // 16: botconf.v1.FormKind
-	(*MapKind)(nil),           // 17: botconf.v1.MapKind
-	(*ValueEntry)(nil),        // 18: botconf.v1.ValueEntry
-	(*ListRequest)(nil),       // 19: botconf.v1.ListRequest
-	(*ListResponse)(nil),      // 20: botconf.v1.ListResponse
-	(*Ignored)(nil),           // 21: botconf.v1.Ignored
-	(*GetRequest)(nil),        // 22: botconf.v1.GetRequest
-	(*EditRequest)(nil),       // 23: botconf.v1.EditRequest
-	(*UnsetRequest)(nil),      // 24: botconf.v1.UnsetRequest
-	(*ReloadRequest)(nil),     // 25: botconf.v1.ReloadRequest
-	(*ChangeResponse)(nil),    // 26: botconf.v1.ChangeResponse
-	(*Limits)(nil),            // 27: botconf.v1.Limits
-	(*Span)(nil),              // 28: botconf.v1.Span
-	(*Text)(nil),              // 29: botconf.v1.Text
-	(*Button)(nil),            // 30: botconf.v1.Button
-	(*Row)(nil),               // 31: botconf.v1.Row
-	(*Screen)(nil),            // 32: botconf.v1.Screen
-	(*Picker)(nil),            // 33: botconf.v1.Picker
-	(*Ask)(nil),               // 34: botconf.v1.Ask
-	(*Page)(nil),              // 35: botconf.v1.Page
-	(*HomePage)(nil),          // 36: botconf.v1.HomePage
-	(*RenderRequest)(nil),     // 37: botconf.v1.RenderRequest
-	(*RenderResponse)(nil),    // 38: botconf.v1.RenderResponse
-	(*Answer)(nil),            // 39: botconf.v1.Answer
-	(*Picked)(nil),            // 40: botconf.v1.Picked
-	(*Cancel)(nil),            // 41: botconf.v1.Cancel
-	(*ActRequest)(nil),        // 42: botconf.v1.ActRequest
-	(*ActResponse)(nil),       // 43: botconf.v1.ActResponse
-	(*WatchRequest)(nil),      // 44: botconf.v1.WatchRequest
-	(*WatchEvent)(nil),        // 45: botconf.v1.WatchEvent
+	(*FieldCondition)(nil),    // 16: botconf.v1.FieldCondition
+	(*FormKind)(nil),          // 17: botconf.v1.FormKind
+	(*MapKind)(nil),           // 18: botconf.v1.MapKind
+	(*ValueEntry)(nil),        // 19: botconf.v1.ValueEntry
+	(*ListRequest)(nil),       // 20: botconf.v1.ListRequest
+	(*ListResponse)(nil),      // 21: botconf.v1.ListResponse
+	(*Ignored)(nil),           // 22: botconf.v1.Ignored
+	(*GetRequest)(nil),        // 23: botconf.v1.GetRequest
+	(*EditRequest)(nil),       // 24: botconf.v1.EditRequest
+	(*UnsetRequest)(nil),      // 25: botconf.v1.UnsetRequest
+	(*ReloadRequest)(nil),     // 26: botconf.v1.ReloadRequest
+	(*ChangeResponse)(nil),    // 27: botconf.v1.ChangeResponse
+	(*Limits)(nil),            // 28: botconf.v1.Limits
+	(*Span)(nil),              // 29: botconf.v1.Span
+	(*Text)(nil),              // 30: botconf.v1.Text
+	(*Button)(nil),            // 31: botconf.v1.Button
+	(*Row)(nil),               // 32: botconf.v1.Row
+	(*Screen)(nil),            // 33: botconf.v1.Screen
+	(*Picker)(nil),            // 34: botconf.v1.Picker
+	(*Ask)(nil),               // 35: botconf.v1.Ask
+	(*Page)(nil),              // 36: botconf.v1.Page
+	(*HomePage)(nil),          // 37: botconf.v1.HomePage
+	(*RenderRequest)(nil),     // 38: botconf.v1.RenderRequest
+	(*RenderResponse)(nil),    // 39: botconf.v1.RenderResponse
+	(*Answer)(nil),            // 40: botconf.v1.Answer
+	(*Picked)(nil),            // 41: botconf.v1.Picked
+	(*Cancel)(nil),            // 42: botconf.v1.Cancel
+	(*ActRequest)(nil),        // 43: botconf.v1.ActRequest
+	(*ActResponse)(nil),       // 44: botconf.v1.ActResponse
+	(*WatchRequest)(nil),      // 45: botconf.v1.WatchRequest
+	(*WatchEvent)(nil),        // 46: botconf.v1.WatchEvent
 }
 var file_botconf_v1_settings_proto_depIdxs = []int32{
 	2,  // 0: botconf.v1.DescribeRequest.actor:type_name -> botconf.v1.Actor
@@ -3427,76 +3508,77 @@ var file_botconf_v1_settings_proto_depIdxs = []int32{
 	12, // 7: botconf.v1.Kind.one_of:type_name -> botconf.v1.OneOfKind
 	13, // 8: botconf.v1.Kind.set_of:type_name -> botconf.v1.SetOfKind
 	14, // 9: botconf.v1.Kind.ref:type_name -> botconf.v1.RefKind
-	16, // 10: botconf.v1.Kind.form:type_name -> botconf.v1.FormKind
-	17, // 11: botconf.v1.Kind.map:type_name -> botconf.v1.MapKind
+	17, // 10: botconf.v1.Kind.form:type_name -> botconf.v1.FormKind
+	18, // 11: botconf.v1.Kind.map:type_name -> botconf.v1.MapKind
 	7,  // 12: botconf.v1.OneOfKind.choices:type_name -> botconf.v1.Choice
 	7,  // 13: botconf.v1.SetOfKind.choices:type_name -> botconf.v1.Choice
 	8,  // 14: botconf.v1.FormField.kind:type_name -> botconf.v1.Kind
-	15, // 15: botconf.v1.FormKind.fields:type_name -> botconf.v1.FormField
-	7,  // 16: botconf.v1.MapKind.names:type_name -> botconf.v1.Choice
-	8,  // 17: botconf.v1.MapKind.value:type_name -> botconf.v1.Kind
-	0,  // 18: botconf.v1.ValueEntry.source:type_name -> botconf.v1.Source
-	2,  // 19: botconf.v1.ListRequest.actor:type_name -> botconf.v1.Actor
-	18, // 20: botconf.v1.ListResponse.settings:type_name -> botconf.v1.ValueEntry
-	18, // 21: botconf.v1.ListResponse.entries:type_name -> botconf.v1.ValueEntry
-	21, // 22: botconf.v1.ListResponse.ignored:type_name -> botconf.v1.Ignored
-	18, // 23: botconf.v1.ListResponse.parked:type_name -> botconf.v1.ValueEntry
-	2,  // 24: botconf.v1.GetRequest.actor:type_name -> botconf.v1.Actor
-	2,  // 25: botconf.v1.EditRequest.actor:type_name -> botconf.v1.Actor
-	2,  // 26: botconf.v1.UnsetRequest.actor:type_name -> botconf.v1.Actor
-	2,  // 27: botconf.v1.ReloadRequest.actor:type_name -> botconf.v1.Actor
-	18, // 28: botconf.v1.ChangeResponse.current:type_name -> botconf.v1.ValueEntry
-	1,  // 29: botconf.v1.Span.style:type_name -> botconf.v1.Style
-	28, // 30: botconf.v1.Text.spans:type_name -> botconf.v1.Span
-	30, // 31: botconf.v1.Row.buttons:type_name -> botconf.v1.Button
-	29, // 32: botconf.v1.Screen.text:type_name -> botconf.v1.Text
-	31, // 33: botconf.v1.Screen.rows:type_name -> botconf.v1.Row
-	29, // 34: botconf.v1.Ask.text:type_name -> botconf.v1.Text
-	33, // 35: botconf.v1.Ask.picker:type_name -> botconf.v1.Picker
-	31, // 36: botconf.v1.Ask.rows:type_name -> botconf.v1.Row
-	36, // 37: botconf.v1.Page.home:type_name -> botconf.v1.HomePage
-	2,  // 38: botconf.v1.RenderRequest.actor:type_name -> botconf.v1.Actor
-	35, // 39: botconf.v1.RenderRequest.page:type_name -> botconf.v1.Page
-	27, // 40: botconf.v1.RenderRequest.limits:type_name -> botconf.v1.Limits
-	32, // 41: botconf.v1.RenderResponse.screen:type_name -> botconf.v1.Screen
-	40, // 42: botconf.v1.Answer.picked:type_name -> botconf.v1.Picked
-	41, // 43: botconf.v1.Answer.cancel:type_name -> botconf.v1.Cancel
-	2,  // 44: botconf.v1.ActRequest.actor:type_name -> botconf.v1.Actor
-	27, // 45: botconf.v1.ActRequest.limits:type_name -> botconf.v1.Limits
-	39, // 46: botconf.v1.ActRequest.answer:type_name -> botconf.v1.Answer
-	32, // 47: botconf.v1.ActResponse.screen:type_name -> botconf.v1.Screen
-	32, // 48: botconf.v1.ActResponse.post:type_name -> botconf.v1.Screen
-	34, // 49: botconf.v1.ActResponse.ask:type_name -> botconf.v1.Ask
-	29, // 50: botconf.v1.ActResponse.reply:type_name -> botconf.v1.Text
-	2,  // 51: botconf.v1.WatchRequest.actor:type_name -> botconf.v1.Actor
-	18, // 52: botconf.v1.WatchEvent.values:type_name -> botconf.v1.ValueEntry
-	3,  // 53: botconf.v1.Settings.Describe:input_type -> botconf.v1.DescribeRequest
-	19, // 54: botconf.v1.Settings.List:input_type -> botconf.v1.ListRequest
-	22, // 55: botconf.v1.Settings.Get:input_type -> botconf.v1.GetRequest
-	23, // 56: botconf.v1.Settings.Set:input_type -> botconf.v1.EditRequest
-	24, // 57: botconf.v1.Settings.Unset:input_type -> botconf.v1.UnsetRequest
-	23, // 58: botconf.v1.Settings.Add:input_type -> botconf.v1.EditRequest
-	23, // 59: botconf.v1.Settings.Remove:input_type -> botconf.v1.EditRequest
-	25, // 60: botconf.v1.Settings.Reload:input_type -> botconf.v1.ReloadRequest
-	37, // 61: botconf.v1.Settings.Render:input_type -> botconf.v1.RenderRequest
-	42, // 62: botconf.v1.Settings.Act:input_type -> botconf.v1.ActRequest
-	44, // 63: botconf.v1.Settings.Watch:input_type -> botconf.v1.WatchRequest
-	4,  // 64: botconf.v1.Settings.Describe:output_type -> botconf.v1.DescribeResponse
-	20, // 65: botconf.v1.Settings.List:output_type -> botconf.v1.ListResponse
-	18, // 66: botconf.v1.Settings.Get:output_type -> botconf.v1.ValueEntry
-	26, // 67: botconf.v1.Settings.Set:output_type -> botconf.v1.ChangeResponse
-	26, // 68: botconf.v1.Settings.Unset:output_type -> botconf.v1.ChangeResponse
-	26, // 69: botconf.v1.Settings.Add:output_type -> botconf.v1.ChangeResponse
-	26, // 70: botconf.v1.Settings.Remove:output_type -> botconf.v1.ChangeResponse
-	26, // 71: botconf.v1.Settings.Reload:output_type -> botconf.v1.ChangeResponse
-	38, // 72: botconf.v1.Settings.Render:output_type -> botconf.v1.RenderResponse
-	43, // 73: botconf.v1.Settings.Act:output_type -> botconf.v1.ActResponse
-	45, // 74: botconf.v1.Settings.Watch:output_type -> botconf.v1.WatchEvent
-	64, // [64:75] is the sub-list for method output_type
-	53, // [53:64] is the sub-list for method input_type
-	53, // [53:53] is the sub-list for extension type_name
-	53, // [53:53] is the sub-list for extension extendee
-	0,  // [0:53] is the sub-list for field type_name
+	16, // 15: botconf.v1.FormField.when:type_name -> botconf.v1.FieldCondition
+	15, // 16: botconf.v1.FormKind.fields:type_name -> botconf.v1.FormField
+	7,  // 17: botconf.v1.MapKind.names:type_name -> botconf.v1.Choice
+	8,  // 18: botconf.v1.MapKind.value:type_name -> botconf.v1.Kind
+	0,  // 19: botconf.v1.ValueEntry.source:type_name -> botconf.v1.Source
+	2,  // 20: botconf.v1.ListRequest.actor:type_name -> botconf.v1.Actor
+	19, // 21: botconf.v1.ListResponse.settings:type_name -> botconf.v1.ValueEntry
+	19, // 22: botconf.v1.ListResponse.entries:type_name -> botconf.v1.ValueEntry
+	22, // 23: botconf.v1.ListResponse.ignored:type_name -> botconf.v1.Ignored
+	19, // 24: botconf.v1.ListResponse.parked:type_name -> botconf.v1.ValueEntry
+	2,  // 25: botconf.v1.GetRequest.actor:type_name -> botconf.v1.Actor
+	2,  // 26: botconf.v1.EditRequest.actor:type_name -> botconf.v1.Actor
+	2,  // 27: botconf.v1.UnsetRequest.actor:type_name -> botconf.v1.Actor
+	2,  // 28: botconf.v1.ReloadRequest.actor:type_name -> botconf.v1.Actor
+	19, // 29: botconf.v1.ChangeResponse.current:type_name -> botconf.v1.ValueEntry
+	1,  // 30: botconf.v1.Span.style:type_name -> botconf.v1.Style
+	29, // 31: botconf.v1.Text.spans:type_name -> botconf.v1.Span
+	31, // 32: botconf.v1.Row.buttons:type_name -> botconf.v1.Button
+	30, // 33: botconf.v1.Screen.text:type_name -> botconf.v1.Text
+	32, // 34: botconf.v1.Screen.rows:type_name -> botconf.v1.Row
+	30, // 35: botconf.v1.Ask.text:type_name -> botconf.v1.Text
+	34, // 36: botconf.v1.Ask.picker:type_name -> botconf.v1.Picker
+	32, // 37: botconf.v1.Ask.rows:type_name -> botconf.v1.Row
+	37, // 38: botconf.v1.Page.home:type_name -> botconf.v1.HomePage
+	2,  // 39: botconf.v1.RenderRequest.actor:type_name -> botconf.v1.Actor
+	36, // 40: botconf.v1.RenderRequest.page:type_name -> botconf.v1.Page
+	28, // 41: botconf.v1.RenderRequest.limits:type_name -> botconf.v1.Limits
+	33, // 42: botconf.v1.RenderResponse.screen:type_name -> botconf.v1.Screen
+	41, // 43: botconf.v1.Answer.picked:type_name -> botconf.v1.Picked
+	42, // 44: botconf.v1.Answer.cancel:type_name -> botconf.v1.Cancel
+	2,  // 45: botconf.v1.ActRequest.actor:type_name -> botconf.v1.Actor
+	28, // 46: botconf.v1.ActRequest.limits:type_name -> botconf.v1.Limits
+	40, // 47: botconf.v1.ActRequest.answer:type_name -> botconf.v1.Answer
+	33, // 48: botconf.v1.ActResponse.screen:type_name -> botconf.v1.Screen
+	33, // 49: botconf.v1.ActResponse.post:type_name -> botconf.v1.Screen
+	35, // 50: botconf.v1.ActResponse.ask:type_name -> botconf.v1.Ask
+	30, // 51: botconf.v1.ActResponse.reply:type_name -> botconf.v1.Text
+	2,  // 52: botconf.v1.WatchRequest.actor:type_name -> botconf.v1.Actor
+	19, // 53: botconf.v1.WatchEvent.values:type_name -> botconf.v1.ValueEntry
+	3,  // 54: botconf.v1.Settings.Describe:input_type -> botconf.v1.DescribeRequest
+	20, // 55: botconf.v1.Settings.List:input_type -> botconf.v1.ListRequest
+	23, // 56: botconf.v1.Settings.Get:input_type -> botconf.v1.GetRequest
+	24, // 57: botconf.v1.Settings.Set:input_type -> botconf.v1.EditRequest
+	25, // 58: botconf.v1.Settings.Unset:input_type -> botconf.v1.UnsetRequest
+	24, // 59: botconf.v1.Settings.Add:input_type -> botconf.v1.EditRequest
+	24, // 60: botconf.v1.Settings.Remove:input_type -> botconf.v1.EditRequest
+	26, // 61: botconf.v1.Settings.Reload:input_type -> botconf.v1.ReloadRequest
+	38, // 62: botconf.v1.Settings.Render:input_type -> botconf.v1.RenderRequest
+	43, // 63: botconf.v1.Settings.Act:input_type -> botconf.v1.ActRequest
+	45, // 64: botconf.v1.Settings.Watch:input_type -> botconf.v1.WatchRequest
+	4,  // 65: botconf.v1.Settings.Describe:output_type -> botconf.v1.DescribeResponse
+	21, // 66: botconf.v1.Settings.List:output_type -> botconf.v1.ListResponse
+	19, // 67: botconf.v1.Settings.Get:output_type -> botconf.v1.ValueEntry
+	27, // 68: botconf.v1.Settings.Set:output_type -> botconf.v1.ChangeResponse
+	27, // 69: botconf.v1.Settings.Unset:output_type -> botconf.v1.ChangeResponse
+	27, // 70: botconf.v1.Settings.Add:output_type -> botconf.v1.ChangeResponse
+	27, // 71: botconf.v1.Settings.Remove:output_type -> botconf.v1.ChangeResponse
+	27, // 72: botconf.v1.Settings.Reload:output_type -> botconf.v1.ChangeResponse
+	39, // 73: botconf.v1.Settings.Render:output_type -> botconf.v1.RenderResponse
+	44, // 74: botconf.v1.Settings.Act:output_type -> botconf.v1.ActResponse
+	46, // 75: botconf.v1.Settings.Watch:output_type -> botconf.v1.WatchEvent
+	65, // [65:76] is the sub-list for method output_type
+	54, // [54:65] is the sub-list for method input_type
+	54, // [54:54] is the sub-list for extension type_name
+	54, // [54:54] is the sub-list for extension extendee
+	0,  // [0:54] is the sub-list for field type_name
 }
 
 func init() { file_botconf_v1_settings_proto_init() }
@@ -3514,31 +3596,31 @@ func file_botconf_v1_settings_proto_init() {
 		(*Kind_Form)(nil),
 		(*Kind_Map)(nil),
 	}
-	file_botconf_v1_settings_proto_msgTypes[16].OneofWrappers = []any{}
-	file_botconf_v1_settings_proto_msgTypes[24].OneofWrappers = []any{}
-	file_botconf_v1_settings_proto_msgTypes[32].OneofWrappers = []any{}
-	file_botconf_v1_settings_proto_msgTypes[33].OneofWrappers = []any{
+	file_botconf_v1_settings_proto_msgTypes[17].OneofWrappers = []any{}
+	file_botconf_v1_settings_proto_msgTypes[25].OneofWrappers = []any{}
+	file_botconf_v1_settings_proto_msgTypes[33].OneofWrappers = []any{}
+	file_botconf_v1_settings_proto_msgTypes[34].OneofWrappers = []any{
 		(*Page_Home)(nil),
 		(*Page_Section)(nil),
 	}
-	file_botconf_v1_settings_proto_msgTypes[37].OneofWrappers = []any{
+	file_botconf_v1_settings_proto_msgTypes[38].OneofWrappers = []any{
 		(*Answer_Text)(nil),
 		(*Answer_Picked)(nil),
 		(*Answer_Cancel)(nil),
 	}
-	file_botconf_v1_settings_proto_msgTypes[40].OneofWrappers = []any{
+	file_botconf_v1_settings_proto_msgTypes[41].OneofWrappers = []any{
 		(*ActRequest_Press)(nil),
 		(*ActRequest_Answer)(nil),
 		(*ActRequest_Command)(nil),
 	}
-	file_botconf_v1_settings_proto_msgTypes[41].OneofWrappers = []any{}
+	file_botconf_v1_settings_proto_msgTypes[42].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_botconf_v1_settings_proto_rawDesc), len(file_botconf_v1_settings_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   44,
+			NumMessages:   45,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

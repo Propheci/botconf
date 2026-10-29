@@ -99,6 +99,14 @@ struct Registered {
     positions: Range<usize>,
 }
 
+/// A change worked out but not stored yet (see `SettingsStore::prepare`).
+struct Prepared<S: Schema> {
+    value: Value,
+    /// The overrides of the key's entries that the change replaces.
+    replaced: Vec<String>,
+    snapshot: Snapshot<S>,
+}
+
 impl Registry {
     fn sections(&self) -> Vec<Arc<DynamicSection>> {
         self.sections
@@ -498,6 +506,14 @@ impl<S: Schema> SettingsStore<S> {
         Ok(Some(self.publish(snapshot)))
     }
 
+    /// Whether setting `key` to `value` would be accepted, without storing
+    /// or publishing anything: the configuration is built exactly as
+    /// [`Self::set`] would build it, and the same error is returned.
+    pub async fn check(&self, key: &str, value: Value) -> Result<(), SettingsError> {
+        let registry = self.write_lock.lock().await;
+        self.prepare(&registry, key, |_| Ok(value)).map(drop)
+    }
+
     async fn modify(
         &self,
         key: &str,
@@ -505,6 +521,35 @@ impl<S: Schema> SettingsStore<S> {
         new_value: impl FnOnce(Option<Value>) -> Result<Value, SettingsError>,
     ) -> Result<Change<S>, SettingsError> {
         let registry = self.write_lock.lock().await;
+        let Prepared {
+            value,
+            replaced,
+            snapshot,
+        } = self.prepare(&registry, key, new_value)?;
+
+        let stored = StoredOverride {
+            key: key.to_string(),
+            value: value.to_string(),
+            by,
+        };
+        self.storage
+            .write(&replaced, Some(&stored))
+            .await
+            .map_err(SettingsError::Storage)?;
+
+        tracing::info!(key, %value, by = ?stored.by, "runtime setting changed");
+        Ok(self.publish(snapshot))
+    }
+
+    /// What setting `key` would produce: the value, the overrides of its
+    /// entries it replaces, and the new snapshot. Call with the write lock
+    /// held.
+    fn prepare(
+        &self,
+        registry: &Registry,
+        key: &str,
+        new_value: impl FnOnce(Option<Value>) -> Result<Value, SettingsError>,
+    ) -> Result<Prepared<S>, SettingsError> {
         self.catalog().resolve(key)?;
         let previous = self.current();
         let value = new_value(previous.value(key))?;
@@ -539,18 +584,11 @@ impl<S: Schema> SettingsStore<S> {
             reason: error.to_string(),
         })?;
 
-        let stored = StoredOverride {
-            key: key.to_string(),
-            value: value.to_string(),
-            by,
-        };
-        self.storage
-            .write(&replaced, Some(&stored))
-            .await
-            .map_err(SettingsError::Storage)?;
-
-        tracing::info!(key, %value, by = ?stored.by, "runtime setting changed");
-        Ok(self.publish(snapshot))
+        Ok(Prepared {
+            value,
+            replaced,
+            snapshot,
+        })
     }
 
     /// Why `section` cannot be registered, if it cannot.

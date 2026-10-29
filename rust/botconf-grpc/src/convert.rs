@@ -91,6 +91,14 @@ pub(crate) fn kind(kind: &Kind, view: &dyn View) -> proto::Kind {
                     title: field.title.to_string(),
                     kind: Some(self::kind(&field.kind, view)),
                     group: field.group.as_deref().unwrap_or_default().to_string(),
+                    required: field.required,
+                    when: field
+                        .when
+                        .as_ref()
+                        .map(|(key, value)| proto::FieldCondition {
+                            key: key.to_string(),
+                            value: value.to_string(),
+                        }),
                 })
                 .collect(),
             initial_json: form.initial.to_string(),
@@ -447,7 +455,9 @@ mod tests {
             "Flavour",
             Kind::one_of(Choices::Dynamic(DynamicChoices(flavours)), false, true),
         )
-        .group("look"),
+        .group("look")
+        .required()
+        .when("on", "yes"),
     ];
     const FORM: &Form = &Form::new(FIELDS, r#"{"on": "yes"}"#);
     const FORM_KIND: &Kind = &Kind::form(FORM);
@@ -505,6 +515,31 @@ mod tests {
                 many: true
             })
         );
+    }
+
+    #[test]
+    fn form_fields_round_trip_required_and_when() {
+        use proto::kind::Kind as Wire;
+
+        let Wire::Form(form) = wire(FORM_KIND) else {
+            panic!("not a form");
+        };
+        assert!(!form.fields[0].required);
+        assert_eq!(form.fields[0].when, None);
+        assert!(form.fields[1].required);
+        assert_eq!(
+            form.fields[1].when,
+            Some(proto::FieldCondition {
+                key: "on".into(),
+                value: "yes".into(),
+            })
+        );
+        // What goes on the wire is what decodes from it.
+        let decoded = <proto::FormField as prost::Message>::decode(
+            prost::Message::encode_to_vec(&form.fields[1]).as_slice(),
+        )
+        .unwrap();
+        assert_eq!(decoded, form.fields[1]);
     }
 
     #[test]

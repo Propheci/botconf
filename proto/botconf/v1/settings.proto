@@ -198,6 +198,20 @@ message FormField {
   // Fields of the same group exclude each other: setting one clears the
   // others. Empty for no group.
   string group = 4;
+  // Whether the value is incomplete without this field (the panel's drafts
+  // ask for it before offering to save).
+  bool required = 5;
+  // When set, the field applies only while another field holds a value;
+  // otherwise it is hidden, and dropped when that field changes.
+  FieldCondition when = 6;
+}
+
+// The condition of a form field that applies only sometimes.
+message FieldCondition {
+  // The key of the field the condition reads.
+  string key = 1;
+  // The string that field must hold.
+  string value = 2;
 }
 
 // An object whose fields are edited one by one.

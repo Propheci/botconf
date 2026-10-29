@@ -13,7 +13,7 @@
 
 use std::fmt;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::{View, shared::Shared};
 
@@ -189,6 +189,12 @@ pub struct Field {
     /// Fields of the same group exclude each other: setting one clears the
     /// others (e.g. a light is either white or coloured).
     pub group: Option<Shared<str>>,
+    /// Whether the value is incomplete without this field: the panel's
+    /// drafts ask for it before offering to save.
+    pub required: bool,
+    /// The field applies only while the field `.0` holds the string `.1`;
+    /// otherwise it is hidden, and dropped when that field changes.
+    pub when: Option<(Shared<str>, Shared<str>)>,
 }
 
 impl Field {
@@ -198,6 +204,8 @@ impl Field {
             title: Shared::Static(title),
             kind,
             group: None,
+            required: false,
+            when: None,
         }
     }
 
@@ -209,12 +217,84 @@ impl Field {
         let key = unsafe { std::ptr::read(&self.key) };
         let title = unsafe { std::ptr::read(&self.title) };
         let kind = unsafe { std::ptr::read(&self.kind) };
+        let required = self.required;
+        let when = unsafe { std::ptr::read(&self.when) };
         std::mem::forget(self);
         Self {
             key,
             title,
             kind,
             group: Some(Shared::Static(group)),
+            required,
+            when,
+        }
+    }
+
+    /// The value is incomplete without this field: the panel's drafts ask
+    /// for it before offering to save.
+    #[must_use]
+    pub const fn required(mut self) -> Self {
+        self.required = true;
+        self
+    }
+
+    /// The field applies only while the field `key` holds the string
+    /// `value`; otherwise it is hidden, and dropped when that field changes.
+    #[must_use]
+    pub const fn when(self, key: &'static str, value: &'static str) -> Self {
+        // As in `group`.
+        // SAFETY: each kept field is read once, then `self` is forgotten, so
+        // nothing is dropped twice.
+        let key_ = unsafe { std::ptr::read(&self.key) };
+        let title = unsafe { std::ptr::read(&self.title) };
+        let kind = unsafe { std::ptr::read(&self.kind) };
+        let group = unsafe { std::ptr::read(&self.group) };
+        let required = self.required;
+        std::mem::forget(self);
+        Self {
+            key: key_,
+            title,
+            kind,
+            group,
+            required,
+            when: Some((Shared::Static(key), Shared::Static(value))),
+        }
+    }
+
+    /// Whether the field applies to the form value `form` (see
+    /// [`Self::when`]).
+    pub fn applies(&self, form: &Map<String, Value>) -> bool {
+        match &self.when {
+            None => true,
+            Some((key, value)) => form.get(&**key).and_then(Value::as_str) == Some(&**value),
+        }
+    }
+}
+
+impl Form {
+    /// The fields that apply to `form` (see [`Field::when`]).
+    pub fn applying<'a>(&'a self, form: &'a Map<String, Value>) -> impl Iterator<Item = &'a Field> {
+        self.fields.iter().filter(move |field| field.applies(form))
+    }
+
+    /// The required fields that apply to `form` but have no value in it.
+    pub fn missing<'a>(&'a self, form: &'a Map<String, Value>) -> Vec<&'a Field> {
+        self.applying(form)
+            .filter(|field| field.required)
+            .filter(|field| form.get(&*field.key).is_none_or(Value::is_null))
+            .collect()
+    }
+
+    /// Drops the fields of `form` that no longer apply (see [`Field::when`]).
+    pub fn drop_inapplicable(&self, form: &mut Map<String, Value>) {
+        let gone: Vec<String> = self
+            .fields
+            .iter()
+            .filter(|field| !field.applies(form))
+            .map(|field| field.key.to_string())
+            .collect();
+        for key in gone {
+            form.remove(&key);
         }
     }
 }
@@ -324,6 +404,8 @@ impl Choices {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
     use crate::RuntimeSetting;
 
     #[test]
@@ -373,6 +455,8 @@ mod tests {
                     optional: false,
                 },
                 group: Some("look".to_string().into()),
+                required: false,
+                when: None,
             }]
             .into(),
             initial: "{}".to_string().into(),
@@ -385,5 +469,66 @@ mod tests {
                 value: Shared::owned(Kind::Form(Shared::owned(owned_form))),
             }
         );
+    }
+
+    const ROUTE_FIELDS: &[Field] = &[
+        Field::new("kind", "Kind", Kind::text(false)).required(),
+        Field::new("x", "X", Kind::text(true))
+            .required()
+            .when("kind", "a"),
+        Field::new("y", "Y", Kind::text(true))
+            .when("kind", "b")
+            .required()
+            .group("end"),
+        Field::new("note", "Note", Kind::text(true)),
+    ];
+    const ROUTE: &Form = &Form::new(ROUTE_FIELDS, "{}");
+
+    fn form(value: Value) -> Map<String, Value> {
+        value.as_object().cloned().unwrap()
+    }
+
+    fn keys(fields: Vec<&Field>) -> Vec<String> {
+        fields
+            .into_iter()
+            .map(|field| field.key.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn form_missing_lists_required_applying_fields() {
+        // The builders keep each other's settings, in any order.
+        assert!(ROUTE_FIELDS[2].required);
+        assert_eq!(ROUTE_FIELDS[2].group.as_deref(), Some("end"));
+        assert_eq!(
+            ROUTE_FIELDS[2]
+                .when
+                .as_ref()
+                .map(|(key, value)| (&**key, &**value)),
+            Some(("kind", "b"))
+        );
+
+        assert_eq!(keys(ROUTE.missing(&form(json!({})))), ["kind"]);
+        assert_eq!(keys(ROUTE.missing(&form(json!({"kind": "a"})))), ["x"]);
+        assert_eq!(
+            keys(ROUTE.missing(&form(json!({"kind": "b", "y": null})))),
+            ["y"]
+        );
+        assert!(
+            ROUTE
+                .missing(&form(json!({"kind": "a", "x": "1"})))
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn when_hides_fields() {
+        let a = form(json!({"kind": "a"}));
+        let shown: Vec<_> = ROUTE.applying(&a).map(|field| &*field.key).collect();
+        assert_eq!(shown, ["kind", "x", "note"]);
+
+        let mut switched = form(json!({"kind": "b", "x": "1", "note": "n"}));
+        ROUTE.drop_inapplicable(&mut switched);
+        assert_eq!(Value::Object(switched), json!({"kind": "b", "note": "n"}));
     }
 }

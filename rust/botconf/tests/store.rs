@@ -476,3 +476,31 @@ fn a_fixed_base_does_not_reread() {
         assert_eq!(store.current().config.greeting, "hi");
     });
 }
+
+#[tokio::test]
+async fn check_validates_without_storing() {
+    let storage = Arc::new(MemoryStorage::new());
+    let store = store_with(Arc::clone(&storage)).await;
+    let mut published = store.subscribe();
+    published.borrow_and_update();
+
+    store.check("greeting", json!("hello")).await.unwrap();
+    let refused = store.check("greeting", json!("")).await.unwrap_err();
+    assert!(
+        matches!(&refused, SettingsError::InvalidValue { key, .. } if key == "greeting"),
+        "{refused}"
+    );
+    // The same refusal as `set`'s.
+    let set = store.set("greeting", json!(""), None).await.unwrap_err();
+    assert_eq!(refused.to_string(), set.to_string());
+    assert!(matches!(
+        store.check("nope", json!(1)).await,
+        Err(SettingsError::UnknownKey(_))
+    ));
+
+    // Nothing stored, published or changed.
+    assert_eq!(store.current().config.greeting, "hi");
+    assert!(store.current().overrides().is_empty());
+    assert!(storage.load().await.unwrap().is_empty());
+    assert!(!published.has_changed().unwrap());
+}
