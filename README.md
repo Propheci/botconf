@@ -38,12 +38,14 @@ The Rust crates live in `rust/`. They moved here from
 history ([plan 001](plans/001-extract-crates.md)); their earlier life inside
 that bot's `src/settings/` stays in its repository. The panel engine
 (`botconf-panel`) landed in plan 004 and the gRPC service (`botconf-grpc`) in
-plan 005; the Go SDK follows in plans 006 and 007.
+plan 005, and the Go client (`go/settings`) in plan 006; the Go panel
+renderers follow in plan 007.
 [`plans/README.md`](plans/README.md) has the order and the status of each.
 
 Develop inside the Nix dev shell (`nix develop`, or `direnv allow`), which
 provides the toolchain, a nightly rustfmt (`rustfmt.toml` uses unstable
-options), taplo and protoc (`botconf-grpc` compiles `proto/`).
+options), taplo, protoc (`botconf-grpc` compiles `proto/`), and Go with the
+protoc plugins for the Go module.
 `nix flake check` runs clippy, the tests and the format checks, as CI does.
 
 ## Using it
@@ -55,16 +57,16 @@ not from crates.io or a Go proxy release:
 # Cargo.toml
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
 # SeaORM) and `cli` (a clap subcommand to view and change the settings).
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.5.0", features = ["cli", "sea-orm"] }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.6.0", features = ["cli", "sea-orm"] }
 # The settings panel engine, for writing a front end. Feature: `sea-orm`
 # (keep the handles of long buttons in a SQL table).
-botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.5.0" }
+botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.6.0" }
 # A Telegram settings panel (teloxide) over a botconf store, drawn by the
 # engine. Feature: `sea-orm` (as above).
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.5.0", features = ["sea-orm"] }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.6.0", features = ["sea-orm"] }
 # The gRPC service (tonic 0.12) serving a store and its panel to remote
 # clients. Building it needs `protoc` on the PATH.
-botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.5.0" }
+botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.6.0" }
 ```
 
 Minimum Rust: 1.95 for `botconf`, `botconf-panel` and `botconf-grpc`, 1.96
@@ -75,8 +77,8 @@ its own lock file; for example, enable serde_json's `preserve_order` in the
 host if you want JSON objects to keep their written order.
 
 ```sh
-# Go (once go/ exists)
-go get github.com/propheci/botconf/go@go/v0.1.0
+# Go: the settings client (see "Go" below)
+go get github.com/propheci/botconf/go@go/v0.6.0
 ```
 
 ### Reference kinds
@@ -287,6 +289,50 @@ buttons keep working across restarts and for every client.
 **tonic versions.** A service is added to the host's tonic server, so the
 host must use the same tonic major version as `botconf-grpc` (tonic 0.12,
 prost 0.13). Upgrading tonic happens here first, then in the hosts.
+
+### Go
+
+The Go module (`github.com/propheci/botconf/go`) holds the generated
+bindings (`settingspb`) and a typed client (`settings`) for a
+`botconf.v1.Settings` server, e.g. a connector reading its own settings
+from wuphf's core:
+
+```go
+client, err := settings.Dial("127.0.0.1:50051",
+	settings.WithBearer(os.Getenv("CORE_TOKEN")),     // the host decides who may do what
+	settings.WithActor("telegram.user", "123456789"), // default actor for calls
+)
+if err != nil { /* … */ }
+defer client.Close()
+
+// The values under a prefix now, then each change; after a broken stream
+// the client reconnects and starts again with an Initial event. Decoding
+// into the same struct lays each change over what it holds.
+var mine struct {
+	Rendering struct {
+		EditMode string `json:"edit_mode"`
+	} `json:"rendering"`
+}
+const prefix = "connector_settings.telegram-main"
+for event := range client.Watch(ctx, nil, prefix) {
+	if event.Initial {
+		mine = defaults // the whole state follows
+	}
+	if err := settings.Decode(event.Values, prefix, &mine); err != nil { /* … */ }
+}
+```
+
+The server's statuses come back as typed errors: `errors.Is(err,
+settings.ErrNotFound)` (`ErrPermissionDenied`, `ErrUnavailable`), and
+`errors.As(err, &invalid)` with `*settings.InvalidValueError` for a refused
+value, whose `Reason` is the server's explanation. `Render`, `Press`,
+`Answer` and `Command` drive the panel, and `Questions` keeps a renderer's
+pending question per conversation and user.
+
+Regenerate the bindings with `scripts/gen-go.sh` (protoc-gen-go 1.36.11 and
+protoc-gen-go-grpc 1.6.2, as CI checks). `go test -tags integration
+./settings/...` runs the client against the Rust server (`botconf-grpc`'s
+`toy_server` example; needs cargo and protoc).
 
 ### Versions and tags
 
