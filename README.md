@@ -58,16 +58,16 @@ not from crates.io or a Go proxy release:
 # Cargo.toml
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
 # SeaORM) and `cli` (a clap subcommand to view and change the settings).
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.9.0", features = ["cli", "sea-orm"] }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.10.0", features = ["cli", "sea-orm"] }
 # The settings panel engine, for writing a front end. Feature: `sea-orm`
 # (keep the handles of long buttons in a SQL table).
-botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.9.0" }
+botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.10.0" }
 # A Telegram settings panel (teloxide) over a botconf store, drawn by the
 # engine. Feature: `sea-orm` (as above).
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.9.0", features = ["sea-orm"] }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.10.0", features = ["sea-orm"] }
 # The gRPC service (tonic 0.12) serving a store and its panel to remote
 # clients. Building it needs `protoc` on the PATH.
-botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.9.0" }
+botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.10.0" }
 ```
 
 Minimum Rust: 1.95 for `botconf`, `botconf-panel` and `botconf-grpc`, 1.96
@@ -79,7 +79,7 @@ host if you want JSON objects to keep their written order.
 
 ```sh
 # Go: the settings client (see "Go" below)
-go get github.com/propheci/botconf/go@go/v0.9.0
+go get github.com/propheci/botconf/go@go/v0.10.0
 ```
 
 ### Reloading
@@ -248,7 +248,11 @@ reports what the user did:
 5. Keep the `Ask`'s `Question` until the user answers, then pass the answer to
    `Panel::answer` as an `Input` (typed text, ids picked with a picker, or a
    cancel). The engine keeps no conversation state; `Question::encode` gives a
-   compact form for front ends that keep it as text.
+   compact form for front ends that keep it as text. Show `Ask::back` (‹ Back
+   to the page the question was asked from) wherever the question can carry
+   a button. Pressing it, or any other button of the panel that asked, means
+   the user moved on: forget the question, so their next message is not taken
+   for an answer.
 6. On `PanelError::Stale`, show the notice and redraw the panel with the
    screen it carries; on `PanelError::Rejected`, show the reason and keep the
    panel.

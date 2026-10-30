@@ -34,6 +34,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 9 | 008 | SPIKE (roadmap): a Go port of the store | P3 | M | 005, 006, 009 | — | TODO |
 | 10 | 010 | `reload()` re-reads the config file (`BaseSource`) | P1 | S | 009 | `v0.8.0`, `go/v0.8.0` | DONE (see execution notes; assistant bot branch `botconf-v0.8` pending the owner) |
 | 11 | 011 | Drafts in the settings panel (`required`/`when` fields, `SettingsStore::check`) | P1 | M–L | 004, 005, 009, 010 | `v0.9.0`, `go/v0.9.0` | DONE (see execution notes) |
+| 12 | — | Owner request (2026-10-30): ‹ Back on every question (`Ask.back`); any press of the asking panel ends a pending question | P1 | S | 011 | `v0.10.0`, `go/v0.10.0` | DONE (see execution notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -591,3 +592,41 @@ each is marked in its plan):
     so were `go vet` and `go test -race` (niced, `GOMAXPROCS=2`, `-p=2`).
     Skipped: `nix flake check` (CI runs it) and the local MSRV matrix (only
     `botconf` was checked on 1.95).
+
+- **‹ Back on questions (owner request, 2026-10-30, `v0.10.0`).** After a
+  live test of wuphf's Telegram panel, the owner asked for back buttons on
+  screens such as choosing chats. The pages already had ‹ Back (sections,
+  settings, map entries, form fields) or Cancel (drafts); only questions
+  (typed values, pickers, suggested references, draft fields) had no way back
+  but `/cancel`.
+  - **Engine.** `Ask.back` is a ‹ Back button to the page the question was
+    asked from: the setting, or the draft (kept) for a question on one. It is
+    a separate field rather than a row, so a front end can keep a picker's
+    reply keyboard or a group's force-reply where a button cannot go. Proto:
+    `Ask.back = 7` (additive), Go bindings regenerated with protoc 34.1,
+    protoc-gen-go 1.36.11, protoc-gen-go-grpc 1.6.2.
+  - **Ending the question.** Every front end now forgets a pending question
+    when the user presses its buttons or the panel that asked it, so their
+    next message is not taken for an answer: botconf-telegram
+    (`ends_question`), Go `BotPanel` (`endQuestion`, which also deletes the
+    question and redraws the asking panel), `InlinePanel` (any accepted
+    press), and Discord (any accepted press). A refused press keeps the
+    question, as before.
+  - **Where ‹ Back shows.** botconf-telegram: on the question in private
+    chats; a group question keeps its force-reply (only a reply answers
+    there) and a picker keeps its reply keyboard with Cancel. Go `BotPanel`:
+    on every question except a picker's, whose reply keyboard gains a
+    "✖️ Cancel" button instead. `InlinePanel`: on the inline question; the
+    text fallback still says `/cancel`. Discord: under a picker menu or the
+    "✏️ Answer" button; a modal has its own close.
+  - **Label.** The pages' existing "‹ Back" label is reused rather than a
+    new "◀️ Back", which would look like the pager's ◀.
+  - **Tests.** Engine: `questions_lead_back_to_the_page_that_asked`,
+    `back_from_a_draft_question_keeps_the_draft`. botconf-telegram:
+    `a_press_on_the_question_or_its_panel_ends_the_question`,
+    `questions_carry_back_in_private_chats`. Go Telegram (`back_test.go`):
+    the question carries ‹ Back; ‹ Back on the question or on the panel ends
+    it and no later message is taken as an answer; a press on another panel
+    keeps it; the picker has Cancel; the inline route ends it too. Discord:
+    `TestPickerQuestionsCarryBackWhichEndsThem`. Mutations (no clearing in
+    each front end, ‹ Back left off the question) each failed a test.
