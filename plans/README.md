@@ -35,6 +35,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 10 | 010 | `reload()` re-reads the config file (`BaseSource`) | P1 | S | 009 | `v0.8.0`, `go/v0.8.0` | DONE (see execution notes; assistant bot branch `botconf-v0.8` pending the owner) |
 | 11 | 011 | Drafts in the settings panel (`required`/`when` fields, `SettingsStore::check`) | P1 | M–L | 004, 005, 009, 010 | `v0.9.0`, `go/v0.9.0` | DONE (see execution notes) |
 | 12 | — | Owner request (2026-10-30): ‹ Back on every question (`Ask.back`); any press of the asking panel ends a pending question | P1 | S | 011 | `v0.10.0`, `go/v0.10.0` | DONE (see execution notes) |
+| 13 | 013 | Proto-only `botconf-proto` crate for clients that only call the service (wuphf 054) | P2 | S | 012 | `v0.11.0`, `go/v0.11.0` | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
