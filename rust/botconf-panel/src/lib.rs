@@ -261,6 +261,12 @@ pub struct Ask {
     pub current: Option<String>,
     /// Suggested answers, as buttons (e.g. known chats to add).
     pub rows: Vec<Vec<ButtonView>>,
+    /// ‹ Back: shows the page the question was asked from (the draft, for a
+    /// question on one). Pressing it gives up the question, so the front end
+    /// forgets it, as it does on any press of the panel. Front ends place it
+    /// where their question can carry a button. `None` only when its token
+    /// could not be issued.
+    pub back: Option<ButtonView>,
 }
 
 /// An answer to a question.

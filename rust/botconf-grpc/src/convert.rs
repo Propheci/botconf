@@ -346,6 +346,10 @@ fn ask(ask: &Ask) -> proto::Ask {
         current: ask.current.clone(),
         title: ask.title.clone(),
         rows: rows(&ask.rows),
+        back: ask.back.as_ref().map(|back| proto::Button {
+            label: back.label.clone(),
+            token: back.token.clone(),
+        }),
     }
 }
 
@@ -764,11 +768,16 @@ mod tests {
             }),
             current: Some("hi".into()),
             rows: screen.rows.clone(),
+            back: Some(ButtonView {
+                label: "‹ Back".into(),
+                token: "o:s:1".into(),
+            }),
         });
         assert_eq!(Question::parse(&asked.question), Some(question));
         assert_eq!(asked.title, "Greeting");
         assert_eq!(asked.picker.unwrap().domain, "telegram.user");
         assert_eq!(asked.rows.len(), 1);
+        assert_eq!(asked.back.unwrap().token, "o:s:1");
     }
 
     #[test]

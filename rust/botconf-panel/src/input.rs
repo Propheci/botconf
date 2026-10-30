@@ -24,6 +24,15 @@ const MAX_CANDIDATES: usize = 8;
 /// register: ids are typed in.
 const UNKNOWN_DOMAIN: Domain = Domain::new("", no_id);
 
+/// The page `question` was asked from, where ‹ Back and cancelling lead: the
+/// draft it was asked on, else the setting it is about.
+pub(crate) fn asked_from(question: &Question) -> Page {
+    match (&question.draft, question.target.parent()) {
+        (Some(draft), Some(form)) => Page::Draft(form, draft.clone()),
+        _ => Page::Setting(question.target.clone()),
+    }
+}
+
 fn no_id(_: &str) -> Option<Value> {
     None
 }
@@ -130,6 +139,15 @@ impl<S: Schema> Panel<S> {
             }
             _ => Vec::new(),
         };
+        let back = self
+            .issue_rows(
+                vec![vec![btn("‹ Back", Action::open(asked_from(&question)))]],
+                viewer.limits,
+            )
+            .await
+            .into_iter()
+            .flatten()
+            .next();
 
         Ask {
             question,
@@ -138,6 +156,7 @@ impl<S: Schema> Panel<S> {
             picker,
             current,
             rows,
+            back,
         }
     }
 

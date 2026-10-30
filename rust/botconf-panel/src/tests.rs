@@ -969,3 +969,40 @@ fn old_questions_still_parse() {
     };
     assert_eq!(Question::parse(&drafted.encode()), Some(drafted));
 }
+
+#[tokio::test]
+async fn questions_lead_back_to_the_page_that_asked() {
+    let panel = panel().await;
+    // A typed value, a picker and suggested references: each question has
+    // ‹ Back to its setting.
+    for key in ["greeting", "admins", "rooms"] {
+        let setting = target(&panel, key);
+        let page = render(&panel, &Page::Setting(setting.clone())).await;
+        let ask_label = if key == "greeting" {
+            "✏️ Change"
+        } else {
+            "➕ Add"
+        };
+        let ask = press(&panel, &find(&page, ask_label)).await.ask.unwrap();
+        let back = ask.back.expect("every question has ‹ Back");
+        assert_eq!(back.label, "‹ Back");
+        assert_eq!(action(&back.token), Action::open(Page::Setting(setting)));
+        let shown = press_screen(&panel, &back.token).await;
+        assert_eq!(labels(&shown), labels(&page), "{key}");
+    }
+}
+
+#[tokio::test]
+async fn back_from_a_draft_question_keeps_the_draft() {
+    let panel = panel().await;
+    let draft = new_route(&panel, "r1").await.screen.unwrap();
+    let draft = fill_in(&panel, &draft, "X", "1").await;
+    // Ask for X again, then go back without answering.
+    let field = press_screen(&panel, &find(&draft, "X:")).await;
+    let ask = press(&panel, &find(&field, "✏️ Change")).await.ask.unwrap();
+    let back = press_screen(&panel, &ask.back.unwrap().token).await;
+    assert!(text(&back).contains("draft, not saved"), "{}", text(&back));
+    assert!(text(&back).contains("X: 1"), "{}", text(&back));
+    assert!(labels(&back).iter().any(|label| label == "💾 Save"));
+    assert_eq!(value(&panel, "routes.r1"), None);
+}

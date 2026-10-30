@@ -428,6 +428,10 @@ message Ask {
   string title = 5;
   // Suggested answers, as buttons: pressing one is pressing a panel button.
   repeated Row rows = 6;
+  // ‹ Back to the page the question was asked from. Pressing it is pressing
+  // a panel button, and gives up the question: forget it, as on any press of
+  // the panel. Put it where the question can carry a button.
+  Button back = 7;
 }
 
 // A page of the panel.

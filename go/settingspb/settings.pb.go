@@ -2311,7 +2311,11 @@ type Ask struct {
 	// The setting's title, e.g. as an input placeholder.
 	Title string `protobuf:"bytes,5,opt,name=title,proto3" json:"title,omitempty"`
 	// Suggested answers, as buttons: pressing one is pressing a panel button.
-	Rows          []*Row `protobuf:"bytes,6,rep,name=rows,proto3" json:"rows,omitempty"`
+	Rows []*Row `protobuf:"bytes,6,rep,name=rows,proto3" json:"rows,omitempty"`
+	// ‹ Back to the page the question was asked from. Pressing it is pressing
+	// a panel button, and gives up the question: forget it, as on any press of
+	// the panel. Put it where the question can carry a button.
+	Back          *Button `protobuf:"bytes,7,opt,name=back,proto3" json:"back,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2384,6 +2388,13 @@ func (x *Ask) GetTitle() string {
 func (x *Ask) GetRows() []*Row {
 	if x != nil {
 		return x.Rows
+	}
+	return nil
+}
+
+func (x *Ask) GetBack() *Button {
+	if x != nil {
+		return x.Back
 	}
 	return nil
 }
@@ -3341,14 +3352,15 @@ const file_botconf_v1_settings_proto_rawDesc = "" +
 	"\x04rows\x18\x02 \x03(\v2\x0f.botconf.v1.RowR\x04rows\"4\n" +
 	"\x06Picker\x12\x16\n" +
 	"\x06domain\x18\x01 \x01(\tR\x06domain\x12\x12\n" +
-	"\x04many\x18\x02 \x01(\bR\x04many\"\xd9\x01\n" +
+	"\x04many\x18\x02 \x01(\bR\x04many\"\x81\x02\n" +
 	"\x03Ask\x12\x1a\n" +
 	"\bquestion\x18\x01 \x01(\tR\bquestion\x12$\n" +
 	"\x04text\x18\x02 \x01(\v2\x10.botconf.v1.TextR\x04text\x12*\n" +
 	"\x06picker\x18\x03 \x01(\v2\x12.botconf.v1.PickerR\x06picker\x12\x1d\n" +
 	"\acurrent\x18\x04 \x01(\tH\x00R\acurrent\x88\x01\x01\x12\x14\n" +
 	"\x05title\x18\x05 \x01(\tR\x05title\x12#\n" +
-	"\x04rows\x18\x06 \x03(\v2\x0f.botconf.v1.RowR\x04rowsB\n" +
+	"\x04rows\x18\x06 \x03(\v2\x0f.botconf.v1.RowR\x04rows\x12&\n" +
+	"\x04back\x18\a \x01(\v2\x12.botconf.v1.ButtonR\x04backB\n" +
 	"\n" +
 	"\b_current\"V\n" +
 	"\x04Page\x12*\n" +
@@ -3536,49 +3548,50 @@ var file_botconf_v1_settings_proto_depIdxs = []int32{
 	30, // 35: botconf.v1.Ask.text:type_name -> botconf.v1.Text
 	34, // 36: botconf.v1.Ask.picker:type_name -> botconf.v1.Picker
 	32, // 37: botconf.v1.Ask.rows:type_name -> botconf.v1.Row
-	37, // 38: botconf.v1.Page.home:type_name -> botconf.v1.HomePage
-	2,  // 39: botconf.v1.RenderRequest.actor:type_name -> botconf.v1.Actor
-	36, // 40: botconf.v1.RenderRequest.page:type_name -> botconf.v1.Page
-	28, // 41: botconf.v1.RenderRequest.limits:type_name -> botconf.v1.Limits
-	33, // 42: botconf.v1.RenderResponse.screen:type_name -> botconf.v1.Screen
-	41, // 43: botconf.v1.Answer.picked:type_name -> botconf.v1.Picked
-	42, // 44: botconf.v1.Answer.cancel:type_name -> botconf.v1.Cancel
-	2,  // 45: botconf.v1.ActRequest.actor:type_name -> botconf.v1.Actor
-	28, // 46: botconf.v1.ActRequest.limits:type_name -> botconf.v1.Limits
-	40, // 47: botconf.v1.ActRequest.answer:type_name -> botconf.v1.Answer
-	33, // 48: botconf.v1.ActResponse.screen:type_name -> botconf.v1.Screen
-	33, // 49: botconf.v1.ActResponse.post:type_name -> botconf.v1.Screen
-	35, // 50: botconf.v1.ActResponse.ask:type_name -> botconf.v1.Ask
-	30, // 51: botconf.v1.ActResponse.reply:type_name -> botconf.v1.Text
-	2,  // 52: botconf.v1.WatchRequest.actor:type_name -> botconf.v1.Actor
-	19, // 53: botconf.v1.WatchEvent.values:type_name -> botconf.v1.ValueEntry
-	3,  // 54: botconf.v1.Settings.Describe:input_type -> botconf.v1.DescribeRequest
-	20, // 55: botconf.v1.Settings.List:input_type -> botconf.v1.ListRequest
-	23, // 56: botconf.v1.Settings.Get:input_type -> botconf.v1.GetRequest
-	24, // 57: botconf.v1.Settings.Set:input_type -> botconf.v1.EditRequest
-	25, // 58: botconf.v1.Settings.Unset:input_type -> botconf.v1.UnsetRequest
-	24, // 59: botconf.v1.Settings.Add:input_type -> botconf.v1.EditRequest
-	24, // 60: botconf.v1.Settings.Remove:input_type -> botconf.v1.EditRequest
-	26, // 61: botconf.v1.Settings.Reload:input_type -> botconf.v1.ReloadRequest
-	38, // 62: botconf.v1.Settings.Render:input_type -> botconf.v1.RenderRequest
-	43, // 63: botconf.v1.Settings.Act:input_type -> botconf.v1.ActRequest
-	45, // 64: botconf.v1.Settings.Watch:input_type -> botconf.v1.WatchRequest
-	4,  // 65: botconf.v1.Settings.Describe:output_type -> botconf.v1.DescribeResponse
-	21, // 66: botconf.v1.Settings.List:output_type -> botconf.v1.ListResponse
-	19, // 67: botconf.v1.Settings.Get:output_type -> botconf.v1.ValueEntry
-	27, // 68: botconf.v1.Settings.Set:output_type -> botconf.v1.ChangeResponse
-	27, // 69: botconf.v1.Settings.Unset:output_type -> botconf.v1.ChangeResponse
-	27, // 70: botconf.v1.Settings.Add:output_type -> botconf.v1.ChangeResponse
-	27, // 71: botconf.v1.Settings.Remove:output_type -> botconf.v1.ChangeResponse
-	27, // 72: botconf.v1.Settings.Reload:output_type -> botconf.v1.ChangeResponse
-	39, // 73: botconf.v1.Settings.Render:output_type -> botconf.v1.RenderResponse
-	44, // 74: botconf.v1.Settings.Act:output_type -> botconf.v1.ActResponse
-	46, // 75: botconf.v1.Settings.Watch:output_type -> botconf.v1.WatchEvent
-	65, // [65:76] is the sub-list for method output_type
-	54, // [54:65] is the sub-list for method input_type
-	54, // [54:54] is the sub-list for extension type_name
-	54, // [54:54] is the sub-list for extension extendee
-	0,  // [0:54] is the sub-list for field type_name
+	31, // 38: botconf.v1.Ask.back:type_name -> botconf.v1.Button
+	37, // 39: botconf.v1.Page.home:type_name -> botconf.v1.HomePage
+	2,  // 40: botconf.v1.RenderRequest.actor:type_name -> botconf.v1.Actor
+	36, // 41: botconf.v1.RenderRequest.page:type_name -> botconf.v1.Page
+	28, // 42: botconf.v1.RenderRequest.limits:type_name -> botconf.v1.Limits
+	33, // 43: botconf.v1.RenderResponse.screen:type_name -> botconf.v1.Screen
+	41, // 44: botconf.v1.Answer.picked:type_name -> botconf.v1.Picked
+	42, // 45: botconf.v1.Answer.cancel:type_name -> botconf.v1.Cancel
+	2,  // 46: botconf.v1.ActRequest.actor:type_name -> botconf.v1.Actor
+	28, // 47: botconf.v1.ActRequest.limits:type_name -> botconf.v1.Limits
+	40, // 48: botconf.v1.ActRequest.answer:type_name -> botconf.v1.Answer
+	33, // 49: botconf.v1.ActResponse.screen:type_name -> botconf.v1.Screen
+	33, // 50: botconf.v1.ActResponse.post:type_name -> botconf.v1.Screen
+	35, // 51: botconf.v1.ActResponse.ask:type_name -> botconf.v1.Ask
+	30, // 52: botconf.v1.ActResponse.reply:type_name -> botconf.v1.Text
+	2,  // 53: botconf.v1.WatchRequest.actor:type_name -> botconf.v1.Actor
+	19, // 54: botconf.v1.WatchEvent.values:type_name -> botconf.v1.ValueEntry
+	3,  // 55: botconf.v1.Settings.Describe:input_type -> botconf.v1.DescribeRequest
+	20, // 56: botconf.v1.Settings.List:input_type -> botconf.v1.ListRequest
+	23, // 57: botconf.v1.Settings.Get:input_type -> botconf.v1.GetRequest
+	24, // 58: botconf.v1.Settings.Set:input_type -> botconf.v1.EditRequest
+	25, // 59: botconf.v1.Settings.Unset:input_type -> botconf.v1.UnsetRequest
+	24, // 60: botconf.v1.Settings.Add:input_type -> botconf.v1.EditRequest
+	24, // 61: botconf.v1.Settings.Remove:input_type -> botconf.v1.EditRequest
+	26, // 62: botconf.v1.Settings.Reload:input_type -> botconf.v1.ReloadRequest
+	38, // 63: botconf.v1.Settings.Render:input_type -> botconf.v1.RenderRequest
+	43, // 64: botconf.v1.Settings.Act:input_type -> botconf.v1.ActRequest
+	45, // 65: botconf.v1.Settings.Watch:input_type -> botconf.v1.WatchRequest
+	4,  // 66: botconf.v1.Settings.Describe:output_type -> botconf.v1.DescribeResponse
+	21, // 67: botconf.v1.Settings.List:output_type -> botconf.v1.ListResponse
+	19, // 68: botconf.v1.Settings.Get:output_type -> botconf.v1.ValueEntry
+	27, // 69: botconf.v1.Settings.Set:output_type -> botconf.v1.ChangeResponse
+	27, // 70: botconf.v1.Settings.Unset:output_type -> botconf.v1.ChangeResponse
+	27, // 71: botconf.v1.Settings.Add:output_type -> botconf.v1.ChangeResponse
+	27, // 72: botconf.v1.Settings.Remove:output_type -> botconf.v1.ChangeResponse
+	27, // 73: botconf.v1.Settings.Reload:output_type -> botconf.v1.ChangeResponse
+	39, // 74: botconf.v1.Settings.Render:output_type -> botconf.v1.RenderResponse
+	44, // 75: botconf.v1.Settings.Act:output_type -> botconf.v1.ActResponse
+	46, // 76: botconf.v1.Settings.Watch:output_type -> botconf.v1.WatchEvent
+	66, // [66:77] is the sub-list for method output_type
+	55, // [55:66] is the sub-list for method input_type
+	55, // [55:55] is the sub-list for extension type_name
+	55, // [55:55] is the sub-list for extension extendee
+	0,  // [0:55] is the sub-list for field type_name
 }
 
 func init() { file_botconf_v1_settings_proto_init() }
