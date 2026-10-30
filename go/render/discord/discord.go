@@ -153,12 +153,12 @@ func (p *Panel) HandleInteraction(ctx context.Context, event *discordgo.Interact
 			input := p.picked(data)
 			return true, p.act(ctx, i, false, func(ctx context.Context) (*settingspb.ActResponse, error) {
 				return p.client.Answer(ctx, actorFor(user), p.view(), question, input)
-			}, question)
+			})
 		default:
 			token := strings.TrimPrefix(data.CustomID, p.prefix)
 			return true, p.act(ctx, i, true, func(ctx context.Context) (*settingspb.ActResponse, error) {
 				return p.client.Press(ctx, actorFor(user), p.view(), token)
-			}, "")
+			})
 		}
 	case discordgo.InteractionModalSubmit:
 		data := i.ModalSubmitData()
@@ -172,16 +172,18 @@ func (p *Panel) HandleInteraction(ctx context.Context, event *discordgo.Interact
 		input := settings.TextInput(modalValue(data))
 		return true, p.act(ctx, i, false, func(ctx context.Context) (*settingspb.ActResponse, error) {
 			return p.client.Answer(ctx, actorFor(user), p.view(), question, input)
-		}, question)
+		})
 	}
 	return false, nil
 }
 
 // act runs a press or an answer and shows its result. Discord wants an
 // answer within 3 seconds, so a slow call is acknowledged first and the
-// panel edited afterwards. answered names the question an answer was for, so
-// that it is forgotten once accepted.
-func (p *Panel) act(ctx context.Context, i *discordgo.Interaction, canModal bool, call func(context.Context) (*settingspb.ActResponse, error), answered string) error {
+// panel edited afterwards. Whatever it was, an accepted press or answer ends
+// the user's pending question: an answer answered it, and a press of the panel
+// (‹ Back, another page) means they moved on. A press that asks again sets
+// the new question in show.
+func (p *Panel) act(ctx context.Context, i *discordgo.Interaction, canModal bool, call func(context.Context) (*settingspb.ActResponse, error)) error {
 	type result struct {
 		response *settingspb.ActResponse
 		err      error
@@ -205,7 +207,7 @@ func (p *Panel) act(ctx context.Context, i *discordgo.Interaction, canModal bool
 	if got.err != nil {
 		return errors.Join(got.err, p.ephemeral(i, errorText(got.err), deferred))
 	}
-	if answered != "" && got.response.Rejected == nil {
+	if got.response.Rejected == nil {
 		p.questions.Finish(i.ChannelID, interactionUser(i))
 	}
 	return p.show(i, got.response, deferred, canModal && !deferred)
@@ -240,7 +242,7 @@ func (p *Panel) show(i *discordgo.Interaction, response *settingspb.ActResponse,
 		if menu := p.pickerMenu(ask); menu != nil {
 			update = true
 			content = Markdown(ask.GetText())
-			components = append([]discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{menu}}}, p.components(ask.GetRows())...)
+			components = append([]discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{menu}}}, p.components(askRows(ask))...)
 		} else if canModal {
 			return errors.Join(p.api.InteractionRespond(i, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseModal, Data: p.modal(ask)}), p.notice(i, response))
 		} else {
@@ -249,7 +251,7 @@ func (p *Panel) show(i *discordgo.Interaction, response *settingspb.ActResponse,
 			content = Markdown(ask.GetText())
 			components = append([]discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 				discordgo.Button{Label: "✏️ Answer", Style: discordgo.PrimaryButton, CustomID: p.prefix + answerID},
-			}}}, p.components(ask.GetRows())...)
+			}}}, p.components(askRows(ask))...)
 		}
 	}
 
@@ -455,4 +457,13 @@ func errorText(err error) string {
 	default:
 		return "Something went wrong with the settings."
 	}
+}
+
+// askRows are a question's buttons: its suggestions, then ‹ Back.
+func askRows(ask *settingspb.Ask) []*settingspb.Row {
+	rows := append([]*settingspb.Row(nil), ask.GetRows()...)
+	if back := ask.GetBack(); back != nil {
+		rows = append(rows, &settingspb.Row{Buttons: []*settingspb.Button{back}})
+	}
+	return rows
 }

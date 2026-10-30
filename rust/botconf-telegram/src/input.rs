@@ -19,7 +19,9 @@ use crate::{
 
 /// The text and the keyboard of a question, and whether the keyboard is a
 /// reply keyboard (Telegram's pickers, which must be removed afterwards).
-pub(crate) fn question(prefix: &str, ask: &Ask) -> (String, ReplyMarkup, bool) {
+/// In a private chat a question without pickers carries ‹ Back; in a group it
+/// keeps a force-reply, since only a reply to it answers it there.
+pub(crate) fn question(prefix: &str, ask: &Ask, private: bool) -> (String, ReplyMarkup, bool) {
     let text = render::html(&ask.text);
     let pickers = ask
         .picker
@@ -36,12 +38,22 @@ pub(crate) fn question(prefix: &str, ask: &Ask) -> (String, ReplyMarkup, bool) {
             ReplyMarkup::Keyboard(keyboard),
             true,
         ),
-        // Suggested answers are buttons; the answer can still be typed.
-        None if !ask.rows.is_empty() => (
-            format!("{text}\n\n{}", escape("Send /cancel to stop.")),
-            ReplyMarkup::InlineKeyboard(render::keyboard(prefix, &ask.rows)),
-            false,
-        ),
+        // Suggested answers and ‹ Back are buttons; the answer can still be
+        // typed.
+        None if !ask.rows.is_empty() || (private && ask.back.is_some()) => {
+            let mut rows = ask.rows.clone();
+            rows.extend(ask.back.clone().map(|back| vec![back]));
+            let stop = if ask.back.is_some() {
+                "Tap ‹ Back or send /cancel to stop."
+            } else {
+                "Send /cancel to stop."
+            };
+            (
+                format!("{text}\n\n{}", escape(stop)),
+                ReplyMarkup::InlineKeyboard(render::keyboard(prefix, &rows)),
+                false,
+            )
+        }
         None => (
             format!("{text}\n\n{}", escape("Send /cancel to stop.")),
             prompts::force_reply(ask.title.clone()),
@@ -110,7 +122,7 @@ pub(crate) fn input(message: &Message) -> Input {
 
 #[cfg(test)]
 mod tests {
-    use botconf_panel::{AskKind, Picker, Question, Target, Text};
+    use botconf_panel::{AskKind, ButtonView, Picker, Question, Target, Text};
     use serde_json::json;
 
     use super::*;
@@ -124,6 +136,7 @@ mod tests {
             picker,
             current: None,
             rows: Vec::new(),
+            back: None,
         }
     }
 
@@ -171,7 +184,7 @@ mod tests {
             (picker("toy.thing", true), false),
             (None, false),
         ] {
-            let (text, markup, is_keyboard) = question("cfg:", &ask(picker));
+            let (text, markup, is_keyboard) = question("cfg:", &ask(picker), true);
             assert_eq!(is_keyboard, keyboard);
             assert_eq!(matches!(markup, ReplyMarkup::Keyboard(_)), keyboard);
             let stop = if keyboard {
@@ -181,5 +194,48 @@ mod tests {
             };
             assert!(text.contains(stop), "{text}");
         }
+    }
+
+    #[test]
+    fn questions_carry_back_in_private_chats() {
+        let back = ButtonView {
+            label: "‹ Back".into(),
+            token: "o:s:1".into(),
+        };
+        let with_back = Ask {
+            back: Some(back),
+            ..ask(None)
+        };
+        let callbacks = |markup: &ReplyMarkup| match markup {
+            ReplyMarkup::InlineKeyboard(keyboard) => keyboard
+                .inline_keyboard
+                .iter()
+                .flatten()
+                .map(|button| button.text.clone())
+                .collect::<Vec<_>>(),
+            other => panic!("{other:?}"),
+        };
+
+        let (text, markup, keyboard) = question("cfg:", &with_back, true);
+        assert!(!keyboard);
+        assert_eq!(callbacks(&markup), ["‹ Back"]);
+        assert!(text.contains("Tap ‹ Back"), "{text}");
+
+        // In a group only a reply answers, so the question keeps its
+        // force-reply.
+        let (_, markup, _) = question("cfg:", &with_back, false);
+        assert!(matches!(markup, ReplyMarkup::ForceReply(_)), "{markup:?}");
+
+        // Pickers keep their reply keyboard, which has its own Cancel.
+        let picking = Ask {
+            picker: Some(Picker {
+                domain: USER.into(),
+                many: true,
+            }),
+            ..with_back
+        };
+        let (_, markup, keyboard) = question("cfg:", &picking, true);
+        assert!(keyboard);
+        assert!(matches!(markup, ReplyMarkup::Keyboard(_)));
     }
 }

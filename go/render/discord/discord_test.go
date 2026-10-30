@@ -303,3 +303,45 @@ func TestForeignCustomIDIsIgnored(t *testing.T) {
 		t.Fatalf("HandleInteraction() = %v, %v with %d responses, want it left to the host", handled, err, len(api.responses))
 	}
 }
+
+func TestPickerQuestionsCarryBackWhichEndsThem(t *testing.T) {
+	server := &settingstest.Server{ActFunc: func(request *settingspb.ActRequest) (*settingspb.ActResponse, error) {
+		switch {
+		case request.GetAnswer() != nil:
+			return &settingspb.ActResponse{Screen: screen("Admins: 2")}, nil
+		case request.GetPress() == "a:2:i":
+			return &settingspb.ActResponse{Ask: &settingspb.Ask{
+				Question: "q2",
+				Text:     plain("Who?"),
+				Picker:   &settingspb.Picker{Domain: UserDomain, Many: true},
+				Back:     &settingspb.Button{Label: "‹ Back", Token: "o:s:2"},
+			}}, nil
+		default:
+			return &settingspb.ActResponse{Screen: screen("Admins")}, nil
+		}
+	}}
+	panel, api := newPanel(t, server)
+	ctx := contextFor(t)
+	_, _ = panel.HandleInteraction(ctx, click("cfg:a:2:i"))
+	components := api.responses[0].Data.Components
+	if _, ok := components[0].(discordgo.ActionsRow).Components[0].(discordgo.SelectMenu); !ok {
+		t.Fatalf("first component = %#v, want the picker menu", components[0])
+	}
+	if ids := customIDs(components); len(ids) != 1 || ids[0] != "cfg:o:s:2" {
+		t.Fatalf("question buttons = %v, want ‹ Back", ids)
+	}
+
+	_, _ = panel.HandleInteraction(ctx, click("cfg:o:s:2"))
+	if last := api.responses[len(api.responses)-1]; last.Data.Content != "Admins" {
+		t.Fatalf("response = %#v, want the setting shown again", last)
+	}
+	// The question is over: the menu no longer answers it.
+	selected := click("cfg:!p")
+	selected.Data = discordgo.MessageComponentInteractionData{CustomID: "cfg:!p", ComponentType: discordgo.UserSelectMenuComponent, Values: []string{"7"}}
+	_, _ = panel.HandleInteraction(ctx, selected)
+	for _, act := range server.Acts() {
+		if act.GetAnswer() != nil {
+			t.Fatalf("answered %v after ‹ Back", act.GetAnswer())
+		}
+	}
+}

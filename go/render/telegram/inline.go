@@ -276,6 +276,12 @@ func (p *InlinePanel) HandleInlineCallback(ctx context.Context, update *tg.Updat
 	if response.Rejected != nil {
 		return true, answer(response.GetRejected(), true)
 	}
+	// Any press of the panel (‹ Back, a suggestion, another page) ends a
+	// pending question: the account's next message is not taken for an
+	// answer. A press that asks again sets the new question below.
+	p.mu.Lock()
+	p.question = nil
+	p.mu.Unlock()
 	var errs []error
 	if notice := response.GetNotice(); notice != "" {
 		errs = append(errs, answer(notice, false))
@@ -299,7 +305,7 @@ func (p *InlinePanel) reactInline(ctx context.Context, id tg.InputBotInlineMessa
 		}
 		p.question = &inlineQuestion{question: ask.GetQuestion(), peer: peer, message: id, expires: p.now().Add(inlineQuestionTTL)}
 		p.mu.Unlock()
-		return p.editInline(ctx, id, &settingspb.Screen{Text: askText(ask), Rows: ask.GetRows()}, false)
+		return p.editInline(ctx, id, &settingspb.Screen{Text: askText(ask, true), Rows: askRows(ask)}, false)
 	}
 	if screen == nil {
 		return nil
@@ -426,7 +432,7 @@ func (p *InlinePanel) reactText(ctx context.Context, peer tg.InputPeerClass, rep
 		p.mu.Lock()
 		p.question = &inlineQuestion{question: ask.GetQuestion(), peer: inputPeerKey(peer), expires: p.now().Add(inlineQuestionTTL)}
 		p.mu.Unlock()
-		errs = append(errs, p.sendText(ctx, peer, askText(ask), replyTo))
+		errs = append(errs, p.sendText(ctx, peer, askText(ask, false), replyTo))
 	}
 	if reply := response.GetReply(); reply != nil {
 		errs = append(errs, p.sendText(ctx, peer, reply, replyTo))

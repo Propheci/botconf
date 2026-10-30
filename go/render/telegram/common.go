@@ -23,6 +23,9 @@ const (
 
 	// cancelCommand gives up on a question.
 	cancelCommand = "/cancel"
+	// cancelButton gives up on a question asked with Telegram's picker,
+	// whose reply keyboard cannot carry ‹ Back.
+	cancelButton = "✖️ Cancel"
 )
 
 // actorFor is the settings actor for a Telegram user.
@@ -84,17 +87,28 @@ func senderOf(msg *tg.Message) (int64, bool) {
 // isCancel says whether text gives up on a question.
 func isCancel(text string) bool {
 	text = strings.TrimSpace(text)
-	return text == cancelCommand || strings.HasPrefix(text, cancelCommand+"@")
+	return text == cancelCommand || strings.HasPrefix(text, cancelCommand+"@") || text == cancelButton
 }
 
-// askText is a question with how to give up appended.
-func askText(ask *settingspb.Ask) *settingspb.Text {
+// askText is a question with how to give up appended: ‹ Back when the
+// question shows its buttons, else /cancel.
+func askText(ask *settingspb.Ask, buttons bool) *settingspb.Text {
+	stop := "\n\nSend " + cancelCommand + " to cancel."
+	if buttons && ask.GetBack() != nil {
+		stop = "\n\nTap ‹ Back or send " + cancelCommand + " to cancel."
+	}
 	spans := append([]*settingspb.Span(nil), ask.GetText().GetSpans()...)
-	spans = append(spans, &settingspb.Span{
-		Style: settingspb.Style_STYLE_ITALIC,
-		Text:  "\n\nSend " + cancelCommand + " to cancel.",
-	})
+	spans = append(spans, &settingspb.Span{Style: settingspb.Style_STYLE_ITALIC, Text: stop})
 	return &settingspb.Text{Spans: spans}
+}
+
+// askRows are a question's buttons: its suggestions, then ‹ Back.
+func askRows(ask *settingspb.Ask) []*settingspb.Row {
+	rows := append([]*settingspb.Row(nil), ask.GetRows()...)
+	if back := ask.GetBack(); back != nil {
+		rows = append(rows, &settingspb.Row{Buttons: []*settingspb.Button{back}})
+	}
+	return rows
 }
 
 // withNotice puts a notice above a screen's text, for places that cannot

@@ -137,12 +137,13 @@ async fn handle_button<S: Schema, R: PanelBot>(
     };
     let chat = message.chat.id;
 
-    // A suggestion on a question message answers the question: the panel to
-    // update is the one that asked.
+    // A press on a question (a suggestion, ‹ Back) or on the panel that asked
+    // it ends the question: the user moved on, so their next message is not
+    // taken for an answer. The panel to update is the one that asked.
     let asked = panel
         .prompts
         .pending::<Pending>(panel.owner, chat, query.from.id)
-        .filter(|pending| pending.prompt.message == message.id);
+        .filter(|pending| ends_question(pending, message.id));
     let shown = asked.as_ref().map_or(message.id, |asked| asked.data.panel);
 
     let limits = panel.limits();
@@ -175,6 +176,12 @@ async fn handle_button<S: Schema, R: PanelBot>(
     react(&panel, &bot, &query, chat, shown, reaction).await
 }
 
+/// Whether a press on message `pressed` ends the pending question: a press on
+/// the question itself (a suggestion, ‹ Back) or on the panel that asked it.
+fn ends_question(pending: &Answer<Pending>, pressed: MessageId) -> bool {
+    pending.prompt.message == pressed || pending.data.panel == pressed
+}
+
 /// Draws what a press led to.
 async fn react<S: Schema, R: PanelBot>(
     panel: &SettingsPanel<S, R>,
@@ -199,7 +206,7 @@ async fn react<S: Schema, R: PanelBot>(
         return Ok(());
     }
     if let Some(ask) = &reaction.ask {
-        let (text, markup, keyboard) = input::question(&panel.prefix, ask);
+        let (text, markup, keyboard) = input::question(&panel.prefix, ask, chat.is_user());
         let sent = bot
             .send_message(chat, text)
             .parse_mode(ParseMode::Html)
@@ -449,5 +456,31 @@ mod tests {
                 .all(|data| data.starts_with(PREFIX) && data.len() <= 64)
         );
         assert!(data.contains(&format!("{PREFIX}r:{admins}:7")), "{data:?}");
+    }
+
+    #[test]
+    fn a_press_on_the_question_or_its_panel_ends_the_question() {
+        let prompts = prompts::Prompts::default();
+        let (chat, user) = (ChatId(5), UserId(9));
+        let question =
+            botconf_panel::Question::new(Target::setting(1), botconf_panel::AskKind::Value);
+        prompts.ask(
+            "settings",
+            chat,
+            user,
+            MessageId(20),
+            false,
+            Pending {
+                question,
+                panel: MessageId(10),
+            },
+        );
+        let pending = prompts.pending::<Pending>("settings", chat, user).unwrap();
+        // ‹ Back or a suggestion, on the question.
+        assert!(ends_question(&pending, MessageId(20)));
+        // Any button of the panel that asked.
+        assert!(ends_question(&pending, MessageId(10)));
+        // Another panel in the chat leaves the question alone.
+        assert!(!ends_question(&pending, MessageId(30)));
     }
 }

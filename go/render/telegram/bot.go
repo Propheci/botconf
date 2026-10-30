@@ -131,7 +131,35 @@ func (p *BotPanel) HandleCallback(ctx context.Context, update *tg.UpdateBotCallb
 	if err != nil {
 		return true, errors.Join(err, answer(errorText(err), true))
 	}
-	return true, p.react(ctx, reaction{peer: peer, user: update.UserID, panel: update.MsgID, answer: answer}, response)
+	at := reaction{peer: peer, user: update.UserID, panel: update.MsgID, answer: answer}
+	if response.Rejected == nil {
+		at.panel = p.endQuestion(ctx, peer, update.UserID, update.MsgID)
+	}
+	return true, p.react(ctx, at, response)
+}
+
+// endQuestion forgets the user's pending question when they press its
+// buttons (a suggestion, ‹ Back) or the panel that asked it: they moved on,
+// so their next message is not taken for an answer. It deletes the question
+// and returns the panel the press should redraw.
+func (p *BotPanel) endQuestion(ctx context.Context, peer tg.InputPeerClass, user int64, pressed int) int {
+	conversation, userKey := inputPeerKey(peer), strconv.FormatInt(user, 10)
+	_, ref, ok := p.questions.Pending(conversation, userKey)
+	if !ok {
+		return pressed
+	}
+	panel, questionMsg := parseRef(ref)
+	if pressed != questionMsg && pressed != panel {
+		return pressed
+	}
+	p.questions.Finish(conversation, userKey)
+	p.deleteMessages(ctx, peer, questionMsg)
+	if panel == 0 {
+		// Asked without a panel (e.g. by a command): the question was the
+		// only message, so the press shows its screen anew.
+		return 0
+	}
+	return panel
 }
 
 // HandleMessage takes msg as the answer to a pending question from its sender
@@ -265,23 +293,31 @@ func (p *BotPanel) react(ctx context.Context, at reaction, response *settingspb.
 }
 
 // ask sends a question and keeps it for the user's answer: with the
-// suggested answers as buttons, Telegram's picker, or a force-reply.
+// suggested answers and ‹ Back as buttons, Telegram's picker (with a Cancel
+// button, since a reply keyboard cannot carry ‹ Back), or a force-reply.
 func (p *BotPanel) ask(ctx context.Context, at reaction, ask *settingspb.Ask) error {
 	var replyMarkup tg.ReplyMarkupClass
-	if len(ask.GetRows()) > 0 {
-		replyMarkup = markup(p.prefix, ask.GetRows())
-	} else if picker := pickerButton(ask.GetPicker()); picker != nil && p.view(at.peer).Pickers {
+	buttons := false
+	picker := pickerButton(ask.GetPicker())
+	switch {
+	case len(ask.GetRows()) > 0 || (ask.GetBack() != nil && (picker == nil || !p.view(at.peer).Pickers)):
+		replyMarkup = markup(p.prefix, askRows(ask))
+		buttons = true
+	case picker != nil && p.view(at.peer).Pickers:
 		replyMarkup = &tg.ReplyKeyboardMarkup{
 			Resize:      true,
 			SingleUse:   true,
 			Selective:   true,
 			Placeholder: ask.GetTitle(),
-			Rows:        []tg.KeyboardButtonRow{{Buttons: []tg.KeyboardButtonClass{picker}}},
+			Rows: []tg.KeyboardButtonRow{
+				{Buttons: []tg.KeyboardButtonClass{picker}},
+				{Buttons: []tg.KeyboardButtonClass{&tg.KeyboardButton{Text: cancelButton}}},
+			},
 		}
-	} else {
+	default:
 		replyMarkup = &tg.ReplyKeyboardForceReply{Selective: true, Placeholder: ask.GetTitle()}
 	}
-	questionMsg, err := p.send(ctx, at.peer, askText(ask), replyMarkup, at.replyTo)
+	questionMsg, err := p.send(ctx, at.peer, askText(ask, buttons), replyMarkup, at.replyTo)
 	if err != nil {
 		return err
 	}
