@@ -35,7 +35,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 10 | 010 | `reload()` re-reads the config file (`BaseSource`) | P1 | S | 009 | `v0.8.0`, `go/v0.8.0` | DONE (see execution notes; assistant bot branch `botconf-v0.8` pending the owner) |
 | 11 | 011 | Drafts in the settings panel (`required`/`when` fields, `SettingsStore::check`) | P1 | M–L | 004, 005, 009, 010 | `v0.9.0`, `go/v0.9.0` | DONE (see execution notes) |
 | 12 | — | Owner request (2026-10-30): ‹ Back on every question (`Ask.back`); any press of the asking panel ends a pending question | P1 | S | 011 | `v0.10.0`, `go/v0.10.0` | DONE (see execution notes) |
-| 13 | 013 | Proto-only `botconf-proto` crate for clients that only call the service (wuphf 054) | P2 | S | 012 | `v0.11.0`, `go/v0.11.0` | TODO |
+| 13 | 013 | Proto-only `botconf-proto` crate for clients that only call the service (wuphf 056) | P2 | S | 012 | `v0.11.0`, `go/v0.11.0` | DONE (see execution notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -631,3 +631,17 @@ each is marked in its plan):
     keeps it; the picker has Cancel; the inline route ends it too. Discord:
     `TestPickerQuestionsCarryBackWhichEndsThem`. Mutations (no clearing in
     each front end, ‹ Back left off the question) each failed a test.
+
+- **013 done 2026-11-23 (`v0.11.0`, `go/v0.11.0`).** The generated code moved
+  to `rust/botconf-proto` (deps: prost, tonic; build: tonic-build);
+  `botconf-grpc` re-exports it as `botconf_grpc::proto`, so no host changes.
+  botconf-grpc tests 29 → 29; workspace gate in the dev shell: 137 tests,
+  clippy and fmt (rustfmt nightly, taplo) clean. `cargo tree -p botconf-proto
+  -e normal` shows no `botconf`, `botconf-panel` or `figment`; the mutation
+  (botconf-proto depending on botconf) showed in it. Deviations:
+  - `botconf-proto`'s workspace entry has no `version`, like the other
+    internal crates (there were no internal version pins to bump).
+  - CI's MSRV matrix gained `botconf-proto` (1.95, with protoc); the Nix and
+    CI comments now name it as the crate that compiles `proto/`.
+  - The wuphf plan that needs it is 056 (written as 054 before a renumber).
+  Skipped: `nix flake check` (CI runs it).

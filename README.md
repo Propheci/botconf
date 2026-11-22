@@ -24,6 +24,8 @@ with buttons, a command line, or a remote client.
 rust/      the Rust crates
   botconf/            the core: schema, layering, store, storage, commands
   botconf-panel/      the settings panel engine: screens, buttons, answers
+  botconf-proto/      the generated botconf.v1 messages and stubs, for clients that
+                      only call the service
   botconf-grpc/       the botconf.v1.Settings gRPC service (tonic)
   botconf-telegram/   a Telegram (teloxide) front end for the panel
 proto/     the wire contract (botconf.v1.Settings), shared by Rust and Go
@@ -58,28 +60,32 @@ not from crates.io or a Go proxy release:
 # Cargo.toml
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
 # SeaORM) and `cli` (a clap subcommand to view and change the settings).
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.10.0", features = ["cli", "sea-orm"] }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.11.0", features = ["cli", "sea-orm"] }
 # The settings panel engine, for writing a front end. Feature: `sea-orm`
 # (keep the handles of long buttons in a SQL table).
-botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.10.0" }
+botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.11.0" }
 # A Telegram settings panel (teloxide) over a botconf store, drawn by the
 # engine. Feature: `sea-orm` (as above).
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.10.0", features = ["sea-orm"] }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.11.0", features = ["sea-orm"] }
 # The gRPC service (tonic 0.12) serving a store and its panel to remote
 # clients. Building it needs `protoc` on the PATH.
-botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.10.0" }
+botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.11.0" }
+# Only the messages and the client and server stubs (prost, tonic 0.12), for a
+# client that calls a settings service without the engine or the panel. Building
+# it needs `protoc` on the PATH.
+botconf-proto = { git = "https://github.com/propheci/botconf", tag = "v0.11.0" }
 ```
 
-Minimum Rust: 1.95 for `botconf`, `botconf-panel` and `botconf-grpc`, 1.96
-for `botconf-telegram` (its teloxide pulls in takecell 0.1.2, which declares
-1.96). The dependency requirements
-are floors, and botconf turns on only the features it uses, so a host keeps
-its own lock file; for example, enable serde_json's `preserve_order` in the
-host if you want JSON objects to keep their written order.
+Minimum Rust: 1.95 for `botconf`, `botconf-panel`, `botconf-proto` and
+`botconf-grpc`, 1.96 for `botconf-telegram` (its teloxide pulls in takecell
+0.1.2, which declares 1.96). The dependency requirements are floors, and
+botconf turns on only the features it uses, so a host keeps its own lock file;
+for example, enable serde_json's `preserve_order` in the host if you want JSON
+objects to keep their written order.
 
 ```sh
 # Go: the settings client (see "Go" below)
-go get github.com/propheci/botconf/go@go/v0.10.0
+go get github.com/propheci/botconf/go@go/v0.11.0
 ```
 
 ### Reloading
