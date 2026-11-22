@@ -1,0 +1,15 @@
+[package]
+name = "botconf-proto"
+description = "Generated messages and gRPC stubs for botconf.v1.Settings"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+prost = { workspace = true }
+tonic = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }

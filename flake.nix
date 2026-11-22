@@ -42,7 +42,7 @@
         packages = [
           nightlyRustfmt
           pkgs.taplo
-          # `botconf-grpc`'s build script compiles `proto/` with it.
+          # `botconf-proto`'s build script compiles `proto/` with it.
           pkgs.protobuf
           # The Go module (`go/`) and `scripts/gen-go.sh`. The committed
           # bindings come from protoc-gen-go 1.36.11 and protoc-gen-go-grpc

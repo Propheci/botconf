@@ -46,11 +46,9 @@ use botconf::{Change, Schema};
 use botconf_panel::{Names, Panel};
 use tonic::{Status, metadata::MetadataMap};
 
-/// The generated messages, client and server of `botconf.v1`.
-#[allow(clippy::all, clippy::pedantic, missing_docs)]
-pub mod proto {
-    tonic::include_proto!("botconf.v1");
-}
+/// The generated messages, client and server of `botconf.v1`, from
+/// [`botconf_proto`].
+pub use botconf_proto as proto;
 
 /// What a request wants to do, for the [`Authorizer`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

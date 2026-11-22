@@ -15,7 +15,7 @@ let
   version = "0.1.0";
 
   # Rust sources, TOML files (incl. rustfmt.toml), Cargo.lock, and the protos
-  # `botconf-grpc` compiles.
+  # `botconf-proto` compiles.
   src = lib.cleanSourceWith {
     src = ../.;
     filter = path: type: (craneLib.filterCargoSources path type) || (lib.hasSuffix ".proto" path);

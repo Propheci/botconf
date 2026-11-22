@@ -444,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "botconf"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "arc-swap",
  "chrono",
@@ -461,10 +461,11 @@ dependencies = [
 
 [[package]]
 name = "botconf-grpc"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "botconf",
  "botconf-panel",
+ "botconf-proto",
  "figment",
  "futures",
  "prost",
@@ -473,13 +474,12 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic",
- "tonic-build",
  "tracing",
 ]
 
 [[package]]
 name = "botconf-panel"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "botconf",
  "figment",
@@ -493,8 +493,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "botconf-proto"
+version = "0.11.0"
+dependencies = [
+ "prost",
+ "tonic",
+ "tonic-build",
+]
+
+[[package]]
 name = "botconf-telegram"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "botconf",

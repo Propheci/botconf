@@ -14,15 +14,13 @@ testing = []
 [dependencies]
 botconf = { workspace = true }
 botconf-panel = { workspace = true }
+botconf-proto = { workspace = true }
 prost = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync"] }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
-
-[build-dependencies]
-tonic-build = { workspace = true }
 
 [dev-dependencies]
 figment = { workspace = true, features = ["toml"] }
