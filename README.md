@@ -455,7 +455,7 @@ what differs but needs the offline import.
 ### Serving settings over gRPC
 
 `botconf-grpc` serves a store and its panel as the `botconf.v1.Settings`
-service ([`proto/botconf/v1/settings.proto`](proto/botconf/v1/settings.proto)),
+service ([`rust/botconf-proto/proto/botconf/v1/settings.proto`](rust/botconf-proto/proto/botconf/v1/settings.proto)),
 so programs in other languages, other processes, or a host's own connectors
 can read the settings, change them, watch them and show the panel:
 
