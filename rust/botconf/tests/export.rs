@@ -32,6 +32,18 @@ struct Config {
     password: Option<String>,
     #[serde(default)]
     peers: Vec<Peer>,
+    /// Limits by feature.
+    #[serde(default)]
+    #[botconf(per_entry)]
+    limits: BTreeMap<String, Limit>,
+}
+
+#[derive(Debug, Describe, Deserialize, Serialize)]
+struct Limit {
+    max: u32,
+    /// Only warn past it.
+    #[serde(default)]
+    soft: bool,
 }
 
 #[derive(Debug, Describe, Deserialize, Serialize)]
@@ -77,6 +89,9 @@ password = "hunter2"
 [[peers]]
 name = "a"
 token_env = "PEER_TOKEN"
+
+[limits.uploads]
+max = 3
 "#;
 
 fn stored(key: &str, value: Value) -> StoredOverride {
@@ -299,6 +314,7 @@ async fn an_online_import_sets_what_changes_at_runtime_and_lists_the_rest() {
         .unwrap();
 
     let dry = import_online(&store, &backup, Some("me".into()), true).await;
+    // The limits are unchanged, though typed they gain `soft = false`.
     assert_eq!(dry.applied, ["greeting"]);
     assert_eq!(
         store.current().config.greeting,

@@ -751,3 +751,10 @@ each is marked in its plan):
     `cli` feature gets no export (wuphf's CLI is its own); a backup
     without secrets keeps the target file's secret options in tables, not
     in lists or maps.
+
+- **`v0.15.1`, `go/v0.15.1` (2026-11-23).** `import_online` compares a
+  backup's values with the store's raw effective values (the file and the
+  overrides as they spell them, as an export writes them) rather than the
+  typed configuration, which adds defaults: an unchanged map of tables (an
+  entry's unset fields) looked changed and was set again. wuphf's online
+  import test caught it on its rules. Export tests clean (+1 case).

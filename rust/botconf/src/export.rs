@@ -377,14 +377,19 @@ pub async fn import_online<S: Schema>(
         .filter(|key| !below_namespace(key))
         .collect();
 
+    // The values as the file and the overrides spell them, as the backup was
+    // written: the typed configuration would add its defaults (an entry's
+    // unset fields), so an unchanged value would look changed.
+    let effective = current.figment.extract::<Value>().unwrap_or(Value::Null);
     let mut changes: Vec<(String, Value)> = Vec::new();
     for key in &runtime {
         if let Some(value) = at(&backup.config, key)
-            && current.value(key).as_ref() != Some(value)
+            && at(&effective, key) != Some(value)
         {
             changes.push((key.clone(), value.clone()));
         }
     }
+    // The dynamic sections' own overrides are kept as stored.
     for (key, value) in &backup.overrides {
         if current.value(key).as_ref() != Some(value) {
             changes.push((key.clone(), value.clone()));
@@ -392,9 +397,7 @@ pub async fn import_online<S: Schema>(
     }
 
     let mut out = OnlineImport::default();
-    if let Ok(effective) = current.figment.extract::<Value>() {
-        differences(&backup.config, &effective, "", &runtime, &mut out.offline);
-    }
+    differences(&backup.config, &effective, "", &runtime, &mut out.offline);
     for (key, value) in changes {
         let result = if dry_run {
             store.check(&key, value).await
