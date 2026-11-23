@@ -383,6 +383,10 @@ fn per_entry_maps_and_summaries() {
     let description = Description::of::<Runtime>("R", "");
     let settings = description.runtime_settings();
     assert!(settings[0].per_entry);
+    assert!(
+        matches!(&settings[0].kind, Kind::Map { names: None, value } if **value == Kind::Json),
+        "a per-entry map holds its entries' kind, as RuntimeSetting::per_entry"
+    );
     assert_eq!(settings[0].description.as_ref(), "Routing rules by id.");
     assert!(
         description

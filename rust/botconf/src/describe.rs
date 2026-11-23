@@ -24,7 +24,7 @@
 //! |---|---|---|
 //! | `title = "…"` | field, variant | The title, instead of the key in words |
 //! | `runtime` | field | Can change at runtime: one of [`Description::runtime_settings`], described by the doc comment's first paragraph |
-//! | `per_entry` | field | A runtime map whose entries are set one by one (implies `runtime`) |
+//! | `per_entry` | field | A runtime map whose entries are set one by one (implies `runtime`; `panel` is then an entry's kind) |
 //! | `panel = <Kind>` | field | The runtime setting's panel editor, instead of the value kind's |
 //! | `secret` | field, type | A secret value: masked on screens |
 //! | `env`, `env = token \| secret \| plain` | field | Names an environment variable holding the value (a token can be generated) |
@@ -280,10 +280,22 @@ fn collect_runtime(table: &Table, prefix: &str, settings: &mut Vec<RuntimeSettin
     for entry in &table.entries {
         let key = join(prefix, &entry.key);
         if entry.runtime {
-            let kind = entry
+            // A per-entry map's panel kind is its entries'; the setting is the
+            // map of them, as `RuntimeSetting::per_entry` declares it.
+            let entry_node = match (&entry.node, entry.per_entry) {
+                (Node::Map(inner), true) => inner,
+                (node, _) => node,
+            };
+            let mut kind = entry
                 .panel_kind
                 .clone()
-                .unwrap_or_else(|| panel_kind(&entry.node, entry.nullable));
+                .unwrap_or_else(|| panel_kind(entry_node, entry.nullable));
+            if entry.per_entry {
+                kind = Kind::Map {
+                    names: None,
+                    value: Shared::owned(kind),
+                };
+            }
             settings.push(RuntimeSetting {
                 key: Shared::new(key.as_str()),
                 title: Some(Shared::new(entry.title.as_str())),

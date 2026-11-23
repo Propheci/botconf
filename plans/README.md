@@ -688,3 +688,8 @@ each is marked in its plan):
   its doc comment's first paragraph (Go: the `doc` tag's), so a panel shows
   the summary while the file and the setup screen show the whole. botconf
   and botconf-derive tests, clippy and the Go describe tests clean.
+
+- **`v0.13.2`, `go/v0.13.2` (2026-11-23).** A derived per-entry setting's kind
+  is the map of its entries' kind (`panel` names an entry's), as
+  `RuntimeSetting::per_entry` declares it; wuphf's panel tests caught the bare
+  form. botconf tests and clippy clean.
