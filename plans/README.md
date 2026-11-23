@@ -37,6 +37,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 12 | — | Owner request (2026-10-30): ‹ Back on every question (`Ask.back`); any press of the asking panel ends a pending question | P1 | S | 011 | `v0.10.0`, `go/v0.10.0` | DONE (see execution notes) |
 | 13 | 013 | Proto-only `botconf-proto` crate for clients that only call the service (wuphf 056) | P2 | S | 012 | `v0.11.0`, `go/v0.11.0` | DONE (see execution notes) |
 | 14 | 014 | Section actions: buttons on a section page that run the host's commands (wuphf 058) | P1 | S–M | 013 | `v0.12.0`, `go/v0.12.0` | DONE (see execution notes) |
+| 15 | 015 | Describe the whole config file from its type (derive + Go reflection); generated examples; offline setup TUIs (`botconf-tui`, `go/tui`) (wuphf 059, 060) | P1 | XL | 014 | `v0.13.0`, `go/v0.13.0` | IN PROGRESS |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
