@@ -65,6 +65,9 @@ pub mod cli;
 pub mod command;
 pub mod describe;
 mod dynamic;
+pub mod env_file;
+#[cfg(feature = "export")]
+pub mod export;
 pub mod keys;
 pub mod kind;
 mod provider;

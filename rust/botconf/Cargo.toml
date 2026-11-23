@@ -15,6 +15,8 @@ cli = ["dep:clap"]
 ## `#[derive(Describe)]`: a config type's description from its doc comments
 ## and serde attributes.
 derive = ["dep:botconf-derive"]
+## Back up the settings and restore them (`botconf::export`).
+export = ["dep:toml"]
 
 [dependencies]
 arc-swap = { workspace = true }
@@ -27,6 +29,7 @@ sea-orm = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+toml = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
 
@@ -34,7 +37,12 @@ tracing = { workspace = true }
 figment = { workspace = true, features = ["test", "toml"] }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test-util"] }
+toml = { workspace = true }
 
 [[test]]
 name = "derive"
 required-features = ["derive"]
+
+[[test]]
+name = "export"
+required-features = ["derive", "export"]
