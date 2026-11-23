@@ -37,7 +37,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 12 | — | Owner request (2026-10-30): ‹ Back on every question (`Ask.back`); any press of the asking panel ends a pending question | P1 | S | 011 | `v0.10.0`, `go/v0.10.0` | DONE (see execution notes) |
 | 13 | 013 | Proto-only `botconf-proto` crate for clients that only call the service (wuphf 056) | P2 | S | 012 | `v0.11.0`, `go/v0.11.0` | DONE (see execution notes) |
 | 14 | 014 | Section actions: buttons on a section page that run the host's commands (wuphf 058) | P1 | S–M | 013 | `v0.12.0`, `go/v0.12.0` | DONE (see execution notes) |
-| 15 | 015 | Describe the whole config file from its type (derive + Go reflection); generated examples; offline setup TUIs (`botconf-tui`, `go/tui`) (wuphf 059, 060) | P1 | XL | 014 | `v0.13.0`, `go/v0.13.0` | IN PROGRESS |
+| 15 | 015 | Describe the whole config file from its type (derive + Go reflection); generated examples; offline setup TUIs (`botconf-tui`, `go/tui`) (wuphf 059, 060) | P1 | XL | 014 | `v0.13.0`, `go/v0.13.0` | DONE (see execution notes) |
 | 16 | 016 | Export and import: one commented TOML backup of the effective settings (file + stored overrides), offline and over gRPC; secrets only with a flag (wuphf 061) | P1 | M–L | 015 | `v0.13.0` or `v0.14.0` | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
@@ -658,3 +658,26 @@ each is marked in its plan):
   "still offered" check) failed `an_action_no_longer_offered_is_stale`.
   No proto or Go change: a press's notice and redraw already reach every
   renderer. Skipped: `nix flake check` (CI runs it).
+
+- **015 done 2026-11-23 (`v0.13.0`, `go/v0.13.0`).** `botconf::describe`
+  (the model, `Describe` for the std types, `render` / `example` /
+  `runtime_settings`), `botconf-derive` (serde's attributes plus
+  `#[botconf(…)]`; defaults through autoref specialization, so a default
+  whose type is not `Serialize` is left out rather than refused),
+  `botconf-tui` (pure key-driven state, ratatui view, env file editor,
+  token generation, atomic writes, a new env file 0600) and its `setup`
+  example; Go `go/describe` (tags, the same rendering) and `go/tui`
+  (bubbletea, the same keys). Workspace gate in the dev shell: 173 tests
+  (143 before), clippy and fmt (rustfmt nightly, taplo) clean; Go gofmt, vet
+  and tests clean. Both setup screens were driven in a pty (enter a value,
+  generate a token, save, quit): the file reads like the example and the env
+  file is 0600. Deviations:
+  - `Entry::nullable` (only an `Option`, or a Go pointer, makes a runtime
+    setting clearable), so derived descriptors equal the hand-written ones
+    wuphf's connectors declare (their shared fixture).
+  - Go has no tagged tables (no internally tagged enums to describe); a list
+    or map of plain values is edited in place as JSON, in both.
+  - Floors for the new dependencies (syn, quote, proc-macro2, ratatui,
+    crossterm, getrandom, toml) were not checked with
+    `-Z direct-minimal-versions`.
+  Skipped: `nix flake check` (CI runs it).

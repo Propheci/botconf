@@ -22,14 +22,19 @@ with buttons, a command line, or a remote client.
 
 ```
 rust/      the Rust crates
-  botconf/            the core: schema, layering, store, storage, commands
+  botconf/            the core: schema, layering, store, storage, commands, the
+                      description of the whole config file
+  botconf-derive/     #[derive(Describe)]: a config type's description from its
+                      doc comments and serde attributes
+  botconf-tui/        an offline setup screen for the config file and its env file
   botconf-panel/      the settings panel engine: screens, buttons, answers
   botconf-proto/      the generated botconf.v1 messages and stubs, for clients that
                       only call the service
   botconf-grpc/       the botconf.v1.Settings gRPC service (tonic)
   botconf-telegram/   a Telegram (teloxide) front end for the panel
 proto/     the wire contract (botconf.v1.Settings), shared by Rust and Go
-go/        the Go module: a client for remote settings and panel renderers
+go/        the Go module: a client for remote settings, panel renderers, the
+           config file's description (describe) and the setup screen (tui)
 plans/     implementation plans (see plans/README.md)
 ```
 
@@ -43,6 +48,9 @@ that bot's `src/settings/` stays in its repository. The panel engine
 plan 005, the Go client (`go/settings`) in plan 006, and the Go panel
 renderers (`go/render/telegram`, `go/render/discord`) in plan 007. Plan 010 made
 `reload()` re-read the config file, and plan 011 added drafts to the panel.
+Plan 015 described the whole config file from its type (`botconf-derive`,
+`go/describe`), with generated examples and offline setup screens
+(`botconf-tui`, `go/tui`).
 [`plans/README.md`](plans/README.md) has the order and the status of each.
 
 Develop inside the Nix dev shell (`nix develop`, or `direnv allow`), which
@@ -59,33 +67,37 @@ not from crates.io or a Go proxy release:
 ```toml
 # Cargo.toml
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
-# SeaORM) and `cli` (a clap subcommand to view and change the settings).
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.12.0", features = ["cli", "sea-orm"] }
+# SeaORM), `cli` (a clap subcommand to view and change the settings) and
+# `derive` (`#[derive(Describe)]`, see "Describing the config file").
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.13.0", features = ["cli", "derive", "sea-orm"] }
+# An offline setup screen (ratatui) over the config file's description.
+botconf-tui = { git = "https://github.com/propheci/botconf", tag = "v0.13.0" }
 # The settings panel engine, for writing a front end. Feature: `sea-orm`
 # (keep the handles of long buttons in a SQL table).
-botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.12.0" }
+botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.13.0" }
 # A Telegram settings panel (teloxide) over a botconf store, drawn by the
 # engine. Feature: `sea-orm` (as above).
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.12.0", features = ["sea-orm"] }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.13.0", features = ["sea-orm"] }
 # The gRPC service (tonic 0.12) serving a store and its panel to remote
 # clients. Building it needs `protoc` on the PATH.
-botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.12.0" }
+botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.13.0" }
 # Only the messages and the client and server stubs (prost, tonic 0.12), for a
 # client that calls a settings service without the engine or the panel. Building
 # it needs `protoc` on the PATH.
-botconf-proto = { git = "https://github.com/propheci/botconf", tag = "v0.12.0" }
+botconf-proto = { git = "https://github.com/propheci/botconf", tag = "v0.13.0" }
 ```
 
-Minimum Rust: 1.95 for `botconf`, `botconf-panel`, `botconf-proto` and
-`botconf-grpc`, 1.96 for `botconf-telegram` (its teloxide pulls in takecell
-0.1.2, which declares 1.96). The dependency requirements are floors, and
-botconf turns on only the features it uses, so a host keeps its own lock file;
+Minimum Rust: 1.95 for `botconf`, `botconf-derive`, `botconf-tui`,
+`botconf-panel`, `botconf-proto` and `botconf-grpc`, 1.96 for
+`botconf-telegram` (its teloxide pulls in takecell 0.1.2, which declares
+1.96). The dependency requirements are floors, and botconf turns on only the
+features it uses, so a host keeps its own lock file;
 for example, enable serde_json's `preserve_order` in the host if you want JSON
 objects to keep their written order.
 
 ```sh
 # Go: the settings client (see "Go" below)
-go get github.com/propheci/botconf/go@go/v0.12.0
+go get github.com/propheci/botconf/go@go/v0.13.0
 ```
 
 ### Reloading
@@ -301,6 +313,71 @@ keep them in its database: with the `sea-orm` feature, create the table in a
 migration with `create_tokens_table(DEFAULT_TOKENS_TABLE)` (`key`, `action`,
 `expires_at` in milliseconds) and pass `SeaOrmTokenStore` to
 `Panel::token_store`, or implement `TokenStore` over the host's own storage.
+
+### Describing the config file
+
+Each option is described once, on the config type: its doc comment is its
+description, and serde's own attributes say its key, default and shape.
+`#[derive(Describe)]` (the `derive` feature) reads them, plus
+`#[botconf(…)]` for what serde does not say (a title, `runtime`, `secret`,
+`env = token`, bounds, an example; the table is in the `describe` module's
+docs). From the [`Description`](rust/botconf/src/describe.rs) botconf derives:
+
+- the runtime settings (`runtime_settings()`), for `Schema::settings`;
+- the example file (`example()`): every option's description as comments,
+  the examples set, the rest commented out. Check it in and test that it
+  equals the generated one, so it never drifts;
+- the file an offline setup writes (`render(values)`), read like the
+  example; keys the description does not know are kept, commented out.
+
+```rust
+#[derive(botconf::Describe, serde::Deserialize, serde::Serialize)]
+struct Config {
+    /// Where the API listens.
+    #[botconf(example = "127.0.0.1:8080")]
+    listen: String,
+    /// The variable holding the token clients present.
+    #[botconf(env = token, hint = "MYBOT_TOKEN")]
+    token_env: Option<String>,
+    /// Longer replies are sent as a file; 0 means no limit.
+    #[serde(default)]
+    #[botconf(runtime, max = 100_000)]
+    max_reply_length: u32,
+}
+
+let description = botconf::Description::of::<Config>("My bot", "My bot's settings.");
+assert_eq!(std::fs::read_to_string("config.example.toml")?, description.example());
+```
+
+Go reads the same from struct tags (`toml`, `doc`, `title`, `default`,
+`example`, `hint`, `required`, `env`, `secret`, `botconf` for a runtime
+setting's title, `jsonschema` for choices and bounds), in `go/describe`:
+`describe.Of(title, description, Config{})`, with `Example`, `Render` and
+`RuntimeSettings`.
+
+### Offline setup
+
+`botconf-tui` (Rust, ratatui) and `go/tui` (Go, bubbletea) open a setup
+screen over a description, the config file and the env file its options
+name, without the program running: every option with its description,
+default and kind; tables, lists and maps opened as screens; values checked as
+they are typed. An option naming an environment variable sets that
+variable's value in the env file (masked when secret; `g` generates a token),
+keeping the env file's other lines. A save is checked by the host's own
+loader first, then written atomically (a new env file readable by its owner
+only).
+
+```rust
+botconf_tui::run(botconf_tui::Setup {
+    description,
+    config: "config.local.toml".into(),
+    env_file: ".env.local".into(),
+    validate: Box::new(|candidate| load(candidate.config, candidate.env).map(drop)),
+})?;
+```
+
+`cargo run -p botconf-tui --example setup -- /tmp/sample.toml /tmp/sample.env`
+tries it on a sample program.
 
 ### Serving settings over gRPC
 
