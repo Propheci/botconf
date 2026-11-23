@@ -39,7 +39,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 14 | 014 | Section actions: buttons on a section page that run the host's commands (wuphf 058) | P1 | S–M | 013 | `v0.12.0`, `go/v0.12.0` | DONE (see execution notes) |
 | 15 | 015 | Describe the whole config file from its type (derive + Go reflection); generated examples; offline setup TUIs (`botconf-tui`, `go/tui`) (wuphf 059, 060) | P1 | XL | 014 | `v0.13.0`, `go/v0.13.0` | DONE (see execution notes) |
 | 16 | 016 | Export and import: one commented TOML backup of the effective settings (file + stored overrides), offline and over gRPC; secrets only with a flag (wuphf 061) | P1 | M–L | 015 | after 017: `v0.15.0`, `go/v0.15.0` | TODO |
-| 17 | 017 | Setup actions (host tasks with questions, QR codes, progress) and value suggestions by domain in the setup screens (wuphf 062, 063) | P1 | M–L | 015 | `v0.14.0`, `go/v0.14.0` | IN PROGRESS |
+| 17 | 017 | Setup actions (host tasks with questions, QR codes, progress) and value suggestions by domain in the setup screens (wuphf 062, 063) | P1 | M–L | 015 | `v0.14.0`, `go/v0.14.0` | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -705,3 +705,19 @@ each is marked in its plan):
   holding several quickly typed characters into as many keys, and types a
   paste into the open input (bubbletea reads them as one message; a pty test
   of wuphf's setup lost its keys). Go tui tests clean.
+
+- **`v0.14.0`, `go/v0.14.0` (2026-11-23), plan 017, for wuphf 062 and 063.**
+  Domains on values (`#[botconf(domain = "…")]`, Go `domain:"…"`; a runtime
+  option with one derives `Kind::Ref`). Both setup screens suggest a domain's
+  values by name as they are typed (`Setup::suggest`, `tui.Setup.Suggest`),
+  open a list of domain values as a screen of its items, and run the host's
+  actions from the root screen (`Setup::action`, `tui.Setup.Actions`) on a
+  worker over the saved files, with a `Session` for lines, progress, a QR
+  code and questions (masked when secret); Esc or Ctrl-C stops one.
+  **Breaking**: `botconf_tui::Setup` gained fields; build it with
+  `Setup::new`. Tests in both languages; pty runs of both examples' pretend
+  login (QR code drawn, code and password answered, notice shown) and a
+  search pick.
+  - Not checked: that the drawn QR code scans from a phone (the plan's STOP
+    condition); the screen refuses to draw one that does not fit rather than
+    wrapping it. The owner checks with wuphf 063's WhatsApp link.

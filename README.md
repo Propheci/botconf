@@ -69,22 +69,22 @@ not from crates.io or a Go proxy release:
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
 # SeaORM), `cli` (a clap subcommand to view and change the settings) and
 # `derive` (`#[derive(Describe)]`, see "Describing the config file").
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.13.4", features = ["cli", "derive", "sea-orm"] }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.14.0", features = ["cli", "derive", "sea-orm"] }
 # An offline setup screen (ratatui) over the config file's description.
-botconf-tui = { git = "https://github.com/propheci/botconf", tag = "v0.13.4" }
+botconf-tui = { git = "https://github.com/propheci/botconf", tag = "v0.14.0" }
 # The settings panel engine, for writing a front end. Feature: `sea-orm`
 # (keep the handles of long buttons in a SQL table).
-botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.13.4" }
+botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.14.0" }
 # A Telegram settings panel (teloxide) over a botconf store, drawn by the
 # engine. Feature: `sea-orm` (as above).
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.13.4", features = ["sea-orm"] }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.14.0", features = ["sea-orm"] }
 # The gRPC service (tonic 0.12) serving a store and its panel to remote
 # clients. Building it needs `protoc` on the PATH.
-botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.13.4" }
+botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.14.0" }
 # Only the messages and the client and server stubs (prost, tonic 0.12), for a
 # client that calls a settings service without the engine or the panel. Building
 # it needs `protoc` on the PATH.
-botconf-proto = { git = "https://github.com/propheci/botconf", tag = "v0.13.4" }
+botconf-proto = { git = "https://github.com/propheci/botconf", tag = "v0.14.0" }
 ```
 
 Minimum Rust: 1.95 for `botconf`, `botconf-derive`, `botconf-tui`,
@@ -97,7 +97,7 @@ objects to keep their written order.
 
 ```sh
 # Go: the settings client (see "Go" below)
-go get github.com/propheci/botconf/go@go/v0.13.4
+go get github.com/propheci/botconf/go@go/v0.14.0
 ```
 
 ### Reloading
@@ -330,6 +330,11 @@ docs). From the [`Description`](rust/botconf/src/describe.rs) botconf derives:
 - the file an offline setup writes (`render(values)`), read like the
   example; keys the description does not know are kept, commented out.
 
+A value (or a list of values) may name its **domain**,
+`#[botconf(domain = "wuphf.chat")]`: a runtime option with one is a
+reference (`Kind::Ref`) for the panel, and the setup screens suggest its
+values by name.
+
 ```rust
 #[derive(botconf::Describe, serde::Deserialize, serde::Serialize)]
 struct Config {
@@ -350,7 +355,7 @@ assert_eq!(std::fs::read_to_string("config.example.toml")?, description.example(
 ```
 
 Go reads the same from struct tags (`toml`, `doc`, `title`, `default`,
-`example`, `hint`, `required`, `env`, `secret`, `botconf` for a runtime
+`example`, `hint`, `required`, `env`, `secret`, `domain`, `botconf` for a runtime
 setting's title, `jsonschema` for choices and bounds), in `go/describe`:
 `describe.Of(title, description, Config{})`, with `Example`, `Render` and
 `RuntimeSettings`.
@@ -367,17 +372,45 @@ keeping the env file's other lines. A save is checked by the host's own
 loader first, then written atomically (a new env file readable by its owner
 only).
 
+The host may add two things:
+
+- **Suggestions**: values of a domain are suggested as they are typed, by
+  the host's `suggest(query)` (the domain, the text so far, the values being
+  edited); Enter picks the highlighted match, and a typed value is still
+  taken. A list of domain values opens as a screen of its items, read by
+  their labels, added and edited by the same search. With no matches the
+  host says why ("no chats known yet: link the connector first").
+- **Actions**, listed on the root screen: host code (a login, a fetch) run
+  on its own thread over the saved files (unsaved changes are saved first,
+  checked as a save). It talks to the screen through a `Session`: lines,
+  progress, a QR code to scan (drawn with half blocks; when the terminal is
+  too small for it, the screen says how big it must be), questions (`ask`;
+  `ask_secret`, masked). Esc or Ctrl-C asks it to stop (`cancelled()`, and an
+  open question answers `None`); its notice or failure is shown like a
+  save's.
+
 ```rust
-botconf_tui::run(botconf_tui::Setup {
+let setup = botconf_tui::Setup::new(
     description,
-    config: "config.local.toml".into(),
-    env_file: ".env.local".into(),
-    validate: Box::new(|candidate| load(candidate.config, candidate.env).map(drop)),
-})?;
+    "config.local.toml",
+    ".env.local",
+    Box::new(|candidate| load(candidate.config, candidate.env).map(drop)),
+)
+.suggest(|query| Ok(known_chats(&query.domain, &query.text, query.limit)))
+.action("Link account", "Log in by QR code.", |session, candidate| {
+    session.qr(&start_login(candidate)?);
+    let code = session.ask("The code the app shows:").ok_or("Stopped.")?;
+    finish_login(&code)
+});
+botconf_tui::run(setup)?;
 ```
 
+Go: `tui.Run(tui.Setup{Description, ConfigPath, EnvPath, Validate, Suggest,
+Actions})`, the same screen.
+
 `cargo run -p botconf-tui --example setup -- /tmp/sample.toml /tmp/sample.env`
-tries it on a sample program.
+(Go: `go run ./tui/example /tmp/sample.toml /tmp/sample.env` in `go/`)
+tries it on a sample program, with a pretend login.
 
 ### Serving settings over gRPC
 
