@@ -251,3 +251,21 @@ func TestAnOptionalTableLeftEmptyStaysAbsent(t *testing.T) {
 		t.Fatalf("read back %+v, %v from\n%s", parsed.Functions, err, rendered)
 	}
 }
+
+func TestADomainMakesAReference(t *testing.T) {
+	type runtime struct {
+		Notify []string `toml:"notify" botconf:"Notify" domain:"app.chat"`
+		Home   string   `toml:"home" botconf:"Home" domain:"app.chat"`
+	}
+	described := MustOf("R", "", runtime{})
+	if described.Table.Entries[0].Domain != "app.chat" {
+		t.Fatal("no domain")
+	}
+	settings := described.RuntimeSettings()
+	for index, many := range []bool{true, false} {
+		ref := settings[index].Kind.GetRef()
+		if ref == nil || ref.Domain != "app.chat" || ref.Many != many {
+			t.Errorf("setting %d: %v", index, settings[index].Kind)
+		}
+	}
+}

@@ -28,7 +28,7 @@ func collectRuntime(table *Table, prefix string, settings *[]*settingspb.Setting
 				Key:         key,
 				Title:       entry.Title,
 				Description: summary(entry.Description),
-				Kind:        panelKind(entry.Node, entry.Nullable),
+				Kind:        entryKind(entry),
 			})
 		case entry.Node.Table != nil:
 			collectRuntime(entry.Node.Table, key, settings)
@@ -80,4 +80,14 @@ func panelKind(node Node, optional bool) *settingspb.Kind {
 	default:
 		return &settingspb.Kind{Kind: &settingspb.Kind_Json{Json: &settingspb.JsonKind{}}}
 	}
+}
+
+// entryKind is a runtime entry's editor: a reference when it names a domain,
+// else its value kind's.
+func entryKind(entry *Entry) *settingspb.Kind {
+	if entry.Domain == "" {
+		return panelKind(entry.Node, entry.Nullable)
+	}
+	many := entry.Node.List != nil || (entry.Node.Value != nil && entry.Node.Value.Kind == TextList)
+	return &settingspb.Kind{Kind: &settingspb.Kind_Ref{Ref: &settingspb.RefKind{Domain: entry.Domain, Many: many}}}
 }

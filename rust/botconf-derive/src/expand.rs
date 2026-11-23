@@ -233,6 +233,11 @@ impl Cx<'_> {
         if botconf.per_entry {
             sets.push(quote!(entry.per_entry = true;));
         }
+        if let Some(domain) = &botconf.domain {
+            sets.push(quote! {
+                entry.domain = ::core::option::Option::Some(::std::string::String::from(#domain));
+            });
+        }
         if let Some(panel) = &botconf.panel {
             let panel = self.user(panel);
             sets.push(quote!(entry.panel_kind = ::core::option::Option::Some(#panel);));

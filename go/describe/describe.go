@@ -21,6 +21,8 @@
 //   - `env:"token"`, `env:"secret"`, `env:"plain"`: the option names an
 //     environment variable holding the value (a token can be generated).
 //   - `secret:"true"`: a secret value, masked on screens.
+//   - `domain:"wuphf.chat"`: where its values come from: the setup screens
+//     suggest them by name, and a runtime option is a reference.
 //   - `jsonschema:"enum=a,enum=b,minimum=0,maximum=9"`: the allowed values.
 //
 // A pointer field is optional (nullable). Values are JSON-like: maps of
@@ -112,6 +114,9 @@ type Entry struct {
 	Runtime bool
 	// Nullable: a runtime setting of it can be cleared (a pointer).
 	Nullable bool
+	// Domain is where its values come from (a chat, a user): the setup
+	// screens suggest them by name, and a runtime option is a reference.
+	Domain string
 }
 
 // Description is a program's whole configuration file.
@@ -201,6 +206,7 @@ func entryOf(field reflect.StructField, key string) (Entry, error) {
 		Required:    field.Tag.Get("required") == "true",
 		Runtime:     runtime,
 		Nullable:    nullable,
+		Domain:      field.Tag.Get("domain"),
 	}
 	for _, slot := range []struct {
 		tag  string

@@ -129,6 +129,8 @@ pub struct Botconf {
     pub runtime: bool,
     /// `per_entry`: a runtime map set entry by entry (implies `runtime`).
     pub per_entry: bool,
+    /// `domain = "…"`: where its values come from.
+    pub domain: Option<LitStr>,
     pub secret: bool,
     /// `env` (a plain value) or `env = token | secret | plain`.
     pub env: Option<Ident>,
@@ -174,6 +176,7 @@ impl Botconf {
             };
             match key.to_string().as_str() {
                 "title" => self.title = Some(syn::parse2(required(value)?)?),
+                "domain" => self.domain = Some(syn::parse2(required(value)?)?),
                 "runtime" => self.runtime = flag(value)?,
                 "per_entry" => {
                     self.per_entry = flag(value)?;

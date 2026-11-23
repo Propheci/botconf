@@ -25,6 +25,7 @@
 //! | `title = "…"` | field, variant | The title, instead of the key in words |
 //! | `runtime` | field | Can change at runtime: one of [`Description::runtime_settings`], described by the doc comment's first paragraph |
 //! | `per_entry` | field | A runtime map whose entries are set one by one (implies `runtime`; `panel` is then an entry's kind) |
+//! | `domain = "…"` | field | Its values come from this domain (a chat, a user): the setup screens suggest them, and a runtime option gets the panel's reference kind |
 //! | `panel = <Kind>` | field | The runtime setting's panel editor, instead of the value kind's |
 //! | `secret` | field, type | A secret value: masked on screens |
 //! | `env`, `env = token \| secret \| plain` | field | Names an environment variable holding the value (a token can be generated) |
@@ -90,6 +91,10 @@ pub struct Entry {
     pub nullable: bool,
     /// A runtime map whose entries are set one by one (`<key>.<name>`).
     pub per_entry: bool,
+    /// The domain its values come from (a chat, a user, …): the setup
+    /// screens suggest them by name, and a runtime option gets the panel's
+    /// reference kind.
+    pub domain: Option<String>,
     /// The panel editor of a runtime setting, when the value kind's is not
     /// enough (a reference, a form).
     pub panel_kind: Option<Kind>,
@@ -184,6 +189,7 @@ impl Entry {
             runtime: false,
             nullable: false,
             per_entry: false,
+            domain: None,
             panel_kind: None,
         }
     }
@@ -286,10 +292,14 @@ fn collect_runtime(table: &Table, prefix: &str, settings: &mut Vec<RuntimeSettin
                 (Node::Map(inner), true) => inner,
                 (node, _) => node,
             };
-            let mut kind = entry
-                .panel_kind
-                .clone()
-                .unwrap_or_else(|| panel_kind(entry_node, entry.nullable));
+            let mut kind = match (&entry.panel_kind, &entry.domain) {
+                (Some(kind), _) => kind.clone(),
+                (None, Some(domain)) => Kind::Ref {
+                    domain: Shared::new(domain.as_str()),
+                    many: matches!(entry_node, Node::Value(ValueKind::TextList) | Node::List(_)),
+                },
+                (None, None) => panel_kind(entry_node, entry.nullable),
+            };
             if entry.per_entry {
                 kind = Kind::Map {
                     names: None,

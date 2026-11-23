@@ -431,3 +431,40 @@ fn an_optional_table_left_empty_stays_absent() {
         Some("p")
     );
 }
+
+#[test]
+fn a_domain_suggests_and_makes_a_reference() {
+    #[derive(Describe, Deserialize)]
+    #[allow(dead_code)]
+    struct Runtime {
+        /// Where notices go.
+        #[serde(default)]
+        #[botconf(runtime, domain = "app.chat")]
+        notify: Vec<String>,
+        /// The one chat.
+        #[botconf(runtime, domain = "app.chat")]
+        home: Option<String>,
+        /// A panel override wins.
+        #[serde(default)]
+        #[botconf(runtime, domain = "app.chat", panel = Kind::Text { optional: false })]
+        other: String,
+    }
+    let description = Description::of::<Runtime>("R", "");
+    assert_eq!(
+        description.table.entries[0].domain.as_deref(),
+        Some("app.chat")
+    );
+    let kinds: Vec<Kind> = description
+        .runtime_settings()
+        .into_iter()
+        .map(|setting| setting.kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            Kind::reference("app.chat", true),
+            Kind::reference("app.chat", false),
+            Kind::Text { optional: false },
+        ]
+    );
+}
