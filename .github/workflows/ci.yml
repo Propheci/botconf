@@ -35,6 +35,9 @@ jobs:
           - package: botconf-derive
             toolchain: "1.95.0"
             args: ""
+          - package: botconf-tui
+            toolchain: "1.95.0"
+            args: ""
           - package: botconf-panel
             toolchain: "1.95.0"
             args: --all-features

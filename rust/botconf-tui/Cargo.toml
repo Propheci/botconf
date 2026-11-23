@@ -1,0 +1,21 @@
+[package]
+name = "botconf-tui"
+description = "An offline setup screen for a program's config file and env file, over its botconf description"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+botconf = { workspace = true }
+crossterm = { workspace = true }
+getrandom = { workspace = true }
+ratatui = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+botconf = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
+toml = { workspace = true }

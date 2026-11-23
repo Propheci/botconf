@@ -26,10 +26,13 @@ anyhow = "1.0.80"
 arc-swap = "1.6"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4.5", features = ["derive"] }
+crossterm = "0.29"
 figment = "0.10.19"
 futures = "0.3.30"
+getrandom = "0.3"
 proc-macro2 = "1.0.86"
 quote = "1.0.36"
+ratatui = "0.30"
 sea-orm = { version = "2.0.3", default-features = false, features = [
   "macros",
   "with-chrono",
@@ -49,6 +52,7 @@ teloxide = { version = "0.17.0", default-features = false, features = [
   "tracing",
 ] }
 thiserror = "2.0.18"
+toml = "0.8"
 tokio = "1.39"
 tracing = "0.1.40"
 
