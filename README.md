@@ -67,24 +67,25 @@ not from crates.io or a Go proxy release:
 ```toml
 # Cargo.toml
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
-# SeaORM), `cli` (a clap subcommand to view and change the settings) and
-# `derive` (`#[derive(Describe)]`, see "Describing the config file").
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.14.1", features = ["cli", "derive", "sea-orm"] }
+# SeaORM), `cli` (a clap subcommand to view and change the settings),
+# `derive` (`#[derive(Describe)]`, see "Describing the config file") and
+# `export` (back up and restore the settings, see "Backups").
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.15.0", features = ["cli", "derive", "sea-orm"] }
 # An offline setup screen (ratatui) over the config file's description.
-botconf-tui = { git = "https://github.com/propheci/botconf", tag = "v0.14.1" }
+botconf-tui = { git = "https://github.com/propheci/botconf", tag = "v0.15.0" }
 # The settings panel engine, for writing a front end. Feature: `sea-orm`
 # (keep the handles of long buttons in a SQL table).
-botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.14.1" }
+botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.15.0" }
 # A Telegram settings panel (teloxide) over a botconf store, drawn by the
 # engine. Feature: `sea-orm` (as above).
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.14.1", features = ["sea-orm"] }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.15.0", features = ["sea-orm"] }
 # The gRPC service (tonic 0.12) serving a store and its panel to remote
 # clients. Building it needs `protoc` on the PATH.
-botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.14.1" }
+botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.15.0" }
 # Only the messages and the client and server stubs (prost, tonic 0.12), for a
 # client that calls a settings service without the engine or the panel. Building
 # it needs `protoc` on the PATH.
-botconf-proto = { git = "https://github.com/propheci/botconf", tag = "v0.14.1" }
+botconf-proto = { git = "https://github.com/propheci/botconf", tag = "v0.15.0" }
 ```
 
 Minimum Rust: 1.95 for `botconf`, `botconf-derive`, `botconf-tui`,
@@ -97,7 +98,7 @@ objects to keep their written order.
 
 ```sh
 # Go: the settings client (see "Go" below)
-go get github.com/propheci/botconf/go@go/v0.14.1
+go get github.com/propheci/botconf/go@go/v0.15.0
 ```
 
 ### Reloading
@@ -412,6 +413,33 @@ Actions})`, the same screen.
 (Go: `go run ./tui/example /tmp/sample.toml /tmp/sample.env` in `go/`)
 tries it on a sample program, with a pretend login.
 
+### Backups
+
+`botconf::export` (the `export` feature) backs up a host's settings as one
+TOML file and restores them. The backup is the effective configuration (the
+file and the environment with every stored override applied), written like
+the config file, then a reserved `[backup]` table with the overrides under
+the schema's dynamic namespaces (which the host's file must not hold):
+
+```rust
+let store = SettingsStore::load(schema, base, storage).await?;
+// Without secrets: the variables its options name are named, not their
+// values, and secret options are left out.
+let backup = botconf::export::export(&description, &store.current(), None)?;
+// With them: `[backup.env_file]` holds the values of the named variables.
+let backup = botconf::export::export(&description, &store.current(), Some(&lookup))?;
+```
+
+Offline (with nothing using the storage), `import(description, backup,
+target, validate)` checks the restored config file with the host's own
+loader before writing anything, keeps `.bak` copies of the config file and
+the env file, writes them (the env file's other lines kept; a backup without
+secrets keeps the current file's secret options), removes the stored
+overrides (the file holds them now) and stores the backup's dynamic ones.
+Online, `import_online(store, backup, by, dry_run)` sets every runtime
+setting and dynamic override whose value differs, as `Set` would, and lists
+what differs but needs the offline import.
+
 ### Serving settings over gRPC
 
 `botconf-grpc` serves a store and its panel as the `botconf.v1.Settings`
@@ -428,6 +456,8 @@ can read the settings, change them, watch them and show the panel:
 | `Render` | A page of the panel, as a `Screen` |
 | `Act` | Press a button (its token), answer a question, or run a text command; the response is the engine's reaction, and a refused or stale press comes back in it (`rejected`, `stale`) rather than as an error |
 | `Watch` | The values under some key prefixes, then every change to them; `catalog_changed` means sections were registered or removed, so `Describe` again |
+| `Export` | A backup of the settings (see "Backups"), never with secrets; needs `SettingsService::description` |
+| `Import` | Restore what of a backup can change at runtime (`dry_run`: only check); the response lists what was set, what needs an offline import, and what was refused |
 
 A host mounts it next to its other tonic services:
 

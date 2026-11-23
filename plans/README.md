@@ -38,7 +38,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 13 | 013 | Proto-only `botconf-proto` crate for clients that only call the service (wuphf 056) | P2 | S | 012 | `v0.11.0`, `go/v0.11.0` | DONE (see execution notes) |
 | 14 | 014 | Section actions: buttons on a section page that run the host's commands (wuphf 058) | P1 | S–M | 013 | `v0.12.0`, `go/v0.12.0` | DONE (see execution notes) |
 | 15 | 015 | Describe the whole config file from its type (derive + Go reflection); generated examples; offline setup TUIs (`botconf-tui`, `go/tui`) (wuphf 059, 060) | P1 | XL | 014 | `v0.13.0`, `go/v0.13.0` | DONE (see execution notes) |
-| 16 | 016 | Export and import: one commented TOML backup of the effective settings (file + stored overrides), offline and over gRPC; secrets only with a flag (wuphf 061) | P1 | M–L | 015 | after 017: `v0.15.0`, `go/v0.15.0` | TODO |
+| 16 | 016 | Export and import: one commented TOML backup of the effective settings (file + stored overrides), offline and over gRPC; secrets only with a flag (wuphf 061) | P1 | M–L | 015 | `v0.15.0`, `go/v0.15.0` | DONE |
 | 17 | 017 | Setup actions (host tasks with questions, QR codes, progress) and value suggestions by domain in the setup screens (wuphf 062, 063) | P1 | M–L | 015 | `v0.14.0`, `go/v0.14.0` | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
@@ -729,3 +729,25 @@ each is marked in its plan):
   in the popup's keys; PgUp and PgDn move by 8. Reported by the owner picking
   a rule's chat in wuphf's setup. Tests in both languages; botconf-tui
   clippy and tests, Go tui tests clean.
+
+- **`v0.15.0`, `go/v0.15.0` (2026-11-23), plan 016, for wuphf 061.**
+  `botconf::export` (feature `export`): `export(description, snapshot,
+  secrets)` writes the effective configuration like the config file, then a
+  reserved `[backup]` table (`format`, `secrets`, `overrides` under the
+  schema's dynamic namespaces, `env_file` only with secrets); a secret
+  option is left out without them. `Backup::parse`, `import` (offline: the
+  host's loader checks first; `.bak` copies; config file, env file, stored
+  overrides) and `import_online` (runtime settings and dynamic overrides set
+  or, dry, checked; the rest listed). The env file moved into botconf
+  (`botconf::env_file`; botconf-tui re-exports it). `botconf.v1.Settings`
+  gains `Export` (needs `SettingsService::description`, never secrets) and
+  `Import`; the Go client's `Export` / `Import`. **Breaking**: `Operation`
+  gains `Export` and `Import` (an exhaustive host authorizer must decide on
+  them). Tests: export +6, grpc +1, Go client +1.
+  - Deviations: the export is taken from a loaded store's snapshot rather
+    than from a base and a storage (the store's layering, not a copy of it:
+    the plan's STOP condition); the setup screens' Export / Import are left
+    to the host's `Setup::action` (they need its store and storage); the
+    `cli` feature gets no export (wuphf's CLI is its own); a backup
+    without secrets keeps the target file's secret options in tables, not
+    in lists or maps.
