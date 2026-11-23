@@ -42,7 +42,7 @@ mod watch;
 
 use std::sync::Arc;
 
-use botconf::{Change, Schema};
+use botconf::{Change, Description, Schema};
 use botconf_panel::{Names, Panel};
 use tonic::{Status, metadata::MetadataMap};
 
@@ -65,6 +65,10 @@ pub enum Operation<'a> {
     Panel,
     /// `Watch` of these key prefixes (empty: every key).
     Watch { prefixes: &'a [String] },
+    /// `Export`: every setting, as a backup (without secrets).
+    Export,
+    /// `Import` of a backup: it may change any runtime setting.
+    Import,
 }
 
 /// Who the host lets a request act as.
@@ -136,6 +140,7 @@ pub struct SettingsService<S: Schema> {
     authorizer: Arc<dyn Authorizer>,
     names: Option<Arc<dyn Names>>,
     on_change: Option<OnChange<S>>,
+    description: Option<Arc<Description>>,
 }
 
 impl<S: Schema> SettingsService<S> {
@@ -147,6 +152,7 @@ impl<S: Schema> SettingsService<S> {
             authorizer: Arc::new(authorizer),
             names: None,
             on_change: None,
+            description: None,
         }
     }
 
@@ -166,6 +172,14 @@ impl<S: Schema> SettingsService<S> {
     #[must_use]
     pub fn on_change(mut self, hook: impl Fn(Arc<Change<S>>) + Send + Sync + 'static) -> Self {
         self.on_change = Some(Arc::new(hook));
+        self
+    }
+
+    /// The config file's description, which `Export` writes the backup from;
+    /// without it, `Export` answers `FAILED_PRECONDITION`.
+    #[must_use]
+    pub fn description(mut self, description: Description) -> Self {
+        self.description = Some(Arc::new(description));
         self
     }
 

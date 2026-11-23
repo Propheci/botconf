@@ -186,3 +186,20 @@ func (c *Client) Reload(ctx context.Context, actor *Actor) (*settingspb.ChangeRe
 	response, err := c.api.Reload(c.call(ctx), &settingspb.ReloadRequest{Actor: c.actor(actor)})
 	return response, convert(err)
 }
+
+// Export is a backup of the server's settings (TOML, never with secrets).
+func (c *Client) Export(ctx context.Context, actor *Actor) (string, error) {
+	response, err := c.api.Export(c.call(ctx), &settingspb.ExportRequest{Actor: c.actor(actor)})
+	if err != nil {
+		return "", convert(err)
+	}
+	return response.GetBackup(), nil
+}
+
+// Import restores what of backup can change at runtime (with dryRun, only
+// checks it): what it set, what needs an import made offline, and what was
+// refused.
+func (c *Client) Import(ctx context.Context, actor *Actor, backup string, dryRun bool) (*settingspb.ImportResponse, error) {
+	response, err := c.api.Import(c.call(ctx), &settingspb.ImportRequest{Actor: c.actor(actor), Backup: backup, DryRun: dryRun})
+	return response, convert(err)
+}

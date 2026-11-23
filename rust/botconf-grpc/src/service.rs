@@ -4,6 +4,7 @@
 use botconf::{
     Change, Schema,
     command::{self, Outcome, SettingsCommand},
+    export,
 };
 use botconf_panel::{Question, Viewer};
 use tokio_stream::wrappers::ReceiverStream;
@@ -306,5 +307,59 @@ impl<S: Schema> Settings for SettingsService<S> {
             std::sync::Arc::clone(self.panel.store()),
             prefixes,
         )))
+    }
+
+    async fn export(
+        &self,
+        request: Request<proto::ExportRequest>,
+    ) -> Result<Response<proto::ExportResponse>, Status> {
+        self.authorize(
+            &request,
+            |message| message.actor.as_ref(),
+            |_| Operation::Export,
+        )?;
+        let Some(description) = &self.description else {
+            return Err(Status::failed_precondition(
+                "this program does not describe its config file, so it cannot export it",
+            ));
+        };
+        let snapshot = self.panel.store().current();
+        // Never with secrets: they would cross the wire.
+        let backup = export::export(description, &snapshot, None)
+            .map_err(|error| Status::internal(error.to_string()))?;
+        Ok(Response::new(proto::ExportResponse { backup }))
+    }
+
+    async fn import(
+        &self,
+        request: Request<proto::ImportRequest>,
+    ) -> Result<Response<proto::ImportResponse>, Status> {
+        let principal = self.authorize(
+            &request,
+            |message| message.actor.as_ref(),
+            |_| Operation::Import,
+        )?;
+        let message = request.into_inner();
+        let backup = export::Backup::parse(&message.backup)
+            .map_err(|error| Status::invalid_argument(error.to_string()))?;
+        let store = self.panel.store();
+        let previous = store.current();
+        let outcome = export::import_online(store, &backup, principal.actor, message.dry_run).await;
+        if !message.dry_run && !outcome.applied.is_empty() {
+            // One report for the whole import, from the state before it.
+            self.changed(Some(Change {
+                previous,
+                current: store.current(),
+            }));
+        }
+        Ok(Response::new(proto::ImportResponse {
+            applied: outcome.applied,
+            offline: outcome.offline,
+            rejected: outcome
+                .rejected
+                .into_iter()
+                .map(|(key, reason)| proto::Ignored { key, reason })
+                .collect(),
+        }))
     }
 }

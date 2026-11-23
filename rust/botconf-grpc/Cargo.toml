@@ -12,7 +12,7 @@ repository.workspace = true
 testing = []
 
 [dependencies]
-botconf = { workspace = true }
+botconf = { workspace = true, features = ["export"] }
 botconf-panel = { workspace = true }
 botconf-proto = { workspace = true }
 prost = { workspace = true }

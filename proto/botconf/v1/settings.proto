@@ -44,6 +44,15 @@ service Settings {
   // The values under some keys now, then every change to them, until the
   // client goes away.
   rpc Watch(WatchRequest) returns (stream WatchEvent);
+  // A backup of the settings: the effective configuration (file, environment
+  // and overrides) written like the config file, then the overrides of the
+  // sections registered at runtime. Never with secrets: they would cross the
+  // wire.
+  rpc Export(ExportRequest) returns (ExportResponse);
+  // Restores what of a backup can change at runtime: every runtime setting and
+  // runtime section override whose value differs is set, as a Set would; the
+  // rest that differs is listed, for an import made offline.
+  rpc Import(ImportRequest) returns (ImportResponse);
 }
 
 // Who a request acts for, as the client claims it: e.g. the Telegram user
@@ -338,6 +347,37 @@ message ChangeResponse {
   uint32 overrides = 5;
   // Reload only: how many stored overrides are ignored.
   uint32 ignored = 6;
+}
+
+// A backup of the settings.
+message ExportRequest {
+  // Who asks.
+  Actor actor = 1;
+}
+
+message ExportResponse {
+  // The backup, TOML.
+  string backup = 1;
+}
+
+// Restores a backup into the running settings.
+message ImportRequest {
+  // Who asks; recorded as the author of the changes.
+  Actor actor = 1;
+  // The backup, TOML, as Export writes it.
+  string backup = 2;
+  // Only check: change nothing.
+  bool dry_run = 3;
+}
+
+message ImportResponse {
+  // The keys set (with dry_run: that would be).
+  repeated string applied = 1;
+  // Keys that differ but cannot change at runtime: an offline import restores
+  // them.
+  repeated string offline = 2;
+  // Keys whose value was refused, with the reason.
+  repeated Ignored rejected = 3;
 }
 
 // ---- panel ----

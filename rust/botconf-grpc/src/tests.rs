@@ -700,3 +700,91 @@ async fn changes_through_the_service_reach_the_hook() {
         .unwrap();
     assert_eq!(heard.lock().unwrap().as_slice(), [7, 8]);
 }
+
+/// The toy's file, described: two of its options.
+fn toy_description() -> botconf::Description {
+    use botconf::describe::{Entry, Node, Table, ValueKind};
+    botconf::Description {
+        title: "Toy".into(),
+        description: String::new(),
+        table: Table {
+            entries: vec![
+                Entry::new("greeting", Node::Value(ValueKind::Text)),
+                Entry::new(
+                    "limit",
+                    Node::Value(ValueKind::Int {
+                        min: i64::MIN,
+                        max: i64::MAX,
+                    }),
+                ),
+            ],
+        },
+    }
+}
+
+#[tokio::test]
+async fn a_backup_is_exported_and_imported_online() {
+    let store = store(MemoryStorage::new()).await;
+    let panel = Arc::new(Panel::new(Arc::clone(&store)));
+    let recording = Recording::default();
+    let mut without = serve(SettingsService::new(Arc::clone(&panel), recording.clone())).await;
+    let status = without
+        .export(proto::ExportRequest { actor: None })
+        .await
+        .unwrap_err();
+    assert_eq!(status.code(), Code::FailedPrecondition);
+
+    let mut client =
+        serve(SettingsService::new(panel, recording.clone()).description(toy_description())).await;
+    client.set(edit("greeting", "hello")).await.unwrap();
+    let backup = client
+        .export(proto::ExportRequest { actor: None })
+        .await
+        .unwrap()
+        .into_inner()
+        .backup;
+    assert!(
+        backup.contains("greeting = \"hello\"") && backup.contains("[backup]"),
+        "{backup}"
+    );
+
+    // Changed since, then restored from the backup.
+    client.set(edit("greeting", "bye")).await.unwrap();
+    let restore = |dry_run| proto::ImportRequest {
+        actor: None,
+        backup: backup.replace("limit = 5", "limit = 6"),
+        dry_run,
+    };
+    let dry = client.import(restore(true)).await.unwrap().into_inner();
+    assert_eq!(dry.applied, ["greeting", "limit"]);
+    assert_eq!(store.current().config.greeting.as_deref(), Some("bye"));
+    let done = client.import(restore(false)).await.unwrap().into_inner();
+    assert_eq!(
+        (done.applied.len(), done.rejected.len()),
+        (2, 0),
+        "{done:?}"
+    );
+    assert_eq!(store.current().config.greeting.as_deref(), Some("hello"));
+    assert_eq!(store.current().config.limit, 6);
+    assert!(
+        recording
+            .seen
+            .lock()
+            .unwrap()
+            .contains(&"Import".to_owned())
+    );
+
+    let status = client
+        .import(proto::ImportRequest {
+            actor: None,
+            backup: "greeting = \"x\"".into(),
+            dry_run: false,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(
+        status.code(),
+        Code::InvalidArgument,
+        "a config file is not a backup"
+    );
+}

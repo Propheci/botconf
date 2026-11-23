@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -317,5 +318,43 @@ func TestActVariants(t *testing.T) {
 		if act.GetLimits().GetTokenBytes() != 64 || !act.GetPickers() {
 			t.Errorf("act %d lost the view: %v", i, act)
 		}
+	}
+}
+
+func (f *fakeServer) Export(ctx context.Context, request *settingspb.ExportRequest) (*settingspb.ExportResponse, error) {
+	f.record(ctx, request.GetActor())
+	return &settingspb.ExportResponse{Backup: "greeting = \"hi\"\n\n[backup]\nformat = 1\n"}, nil
+}
+
+func (f *fakeServer) Import(ctx context.Context, request *settingspb.ImportRequest) (*settingspb.ImportResponse, error) {
+	f.record(ctx, request.GetActor())
+	if !strings.Contains(request.GetBackup(), "[backup]") {
+		return nil, status.Error(codes.InvalidArgument, "not a backup")
+	}
+	response := &settingspb.ImportResponse{Offline: []string{"listen"}}
+	if !request.GetDryRun() {
+		response.Applied = []string{"greeting"}
+	}
+	return response, nil
+}
+
+func TestABackupIsExportedAndImported(t *testing.T) {
+	client := start(t, &fakeServer{})
+	ctx := contextFor(t)
+	backup, err := client.Export(ctx, nil)
+	if err != nil || !strings.Contains(backup, "[backup]") {
+		t.Fatalf("Export() = %q, %v", backup, err)
+	}
+	dry, err := client.Import(ctx, nil, backup, true)
+	if err != nil || len(dry.GetApplied()) != 0 || dry.GetOffline()[0] != "listen" {
+		t.Fatalf("dry run = %v, %v", dry, err)
+	}
+	done, err := client.Import(ctx, nil, backup, false)
+	if err != nil || done.GetApplied()[0] != "greeting" {
+		t.Fatalf("Import() = %v, %v", done, err)
+	}
+	var invalid *InvalidValueError
+	if _, err := client.Import(ctx, nil, "greeting = 1", false); !errors.As(err, &invalid) {
+		t.Fatalf("a config file: %v", err)
 	}
 }
