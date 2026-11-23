@@ -63,6 +63,7 @@ mod base;
 #[cfg(feature = "cli")]
 pub mod cli;
 pub mod command;
+pub mod describe;
 mod dynamic;
 pub mod keys;
 pub mod kind;
@@ -77,6 +78,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 pub use self::{
     base::{BaseError, BaseSource},
+    describe::{Describe, Description},
     dynamic::{DynamicSection, Validator},
     keys::{Catalog, CatalogEntry, RuntimeSetting, UnknownKey},
     kind::{Choice, Choices, DynamicChoices, Field, FixedChoice, Form, Kind},
