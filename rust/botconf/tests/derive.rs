@@ -261,7 +261,10 @@ fn a_flattened_tagged_enum_makes_a_tagged_table() {
         required: true,
         ..Entry::new("source", Node::Value(ValueKind::Text))
     };
-    let only = Entry::new("ONLY", Node::Value(ValueKind::TextList));
+    let only = Entry {
+        nullable: true,
+        ..Entry::new("ONLY", Node::Value(ValueKind::TextList))
+    };
     let target = Entry {
         required: true,
         ..Entry::new("target", Node::Value(ValueKind::Text))
@@ -341,4 +344,26 @@ fn a_rendered_file_reads_back_as_the_type() {
             .example()
             .contains("# Where to listen: an address.\n# Required.\n")
     );
+}
+
+#[test]
+fn only_an_option_makes_a_runtime_setting_clearable() {
+    #[derive(Describe, Deserialize)]
+    #[allow(dead_code)]
+    struct Runtime {
+        #[serde(default)]
+        #[botconf(runtime)]
+        limit: u32,
+        #[botconf(runtime)]
+        name: Option<String>,
+    }
+    let settings = Description::of::<Runtime>("R", "").runtime_settings();
+    assert!(matches!(
+        settings[0].kind,
+        Kind::Number {
+            optional: false,
+            ..
+        }
+    ));
+    assert_eq!(settings[1].kind, Kind::Text { optional: true });
 }

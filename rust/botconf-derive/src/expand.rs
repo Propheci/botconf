@@ -205,6 +205,9 @@ impl Cx<'_> {
         if required {
             sets.push(quote!(entry.required = true;));
         }
+        if is_option(ty) {
+            sets.push(quote!(entry.nullable = true;));
+        }
         if let Some(value) = default {
             // Resolved here, on the concrete type: a default that is not
             // `Serialize` is left out rather than refused.

@@ -84,6 +84,9 @@ pub struct Entry {
     pub hint: Option<Value>,
     /// Can change while the program runs (a runtime setting).
     pub runtime: bool,
+    /// The value can be null (an `Option`): a runtime setting of it can be
+    /// cleared.
+    pub nullable: bool,
     /// The panel editor of a runtime setting, when the value kind's is not
     /// enough (a reference, a form).
     pub panel_kind: Option<Kind>,
@@ -176,6 +179,7 @@ impl Entry {
             example: None,
             hint: None,
             runtime: false,
+            nullable: false,
             panel_kind: None,
         }
     }
@@ -275,7 +279,7 @@ fn collect_runtime(table: &Table, prefix: &str, settings: &mut Vec<RuntimeSettin
             let kind = entry
                 .panel_kind
                 .clone()
-                .unwrap_or_else(|| panel_kind(&entry.node, !entry.required));
+                .unwrap_or_else(|| panel_kind(&entry.node, entry.nullable));
             settings.push(RuntimeSetting {
                 key: Shared::new(key.as_str()),
                 title: Some(Shared::new(entry.title.as_str())),
