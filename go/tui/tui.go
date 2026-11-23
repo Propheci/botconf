@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/pelletier/go-toml/v2"
@@ -38,6 +39,11 @@ type Setup struct {
 	// Validate is the host's check of a candidate: its loader, say. An error
 	// is shown and nothing is written.
 	Validate func(Candidate) error
+	// Suggest gives the values of a domain (`domain:"…"` tags), suggested by
+	// name as they are typed; nil for none.
+	Suggest SuggestFunc
+	// Actions are the host's actions, on the root screen.
+	Actions []Action
 }
 
 // Run opens the setup screen until the user quits. A missing file starts
@@ -51,12 +57,14 @@ func Run(setup Setup) error {
 	if err != nil {
 		return err
 	}
-	model := &model{
-		app:      newApp(setup.Description, values, ParseEnv(envText), filepath.Base(setup.EnvPath), GenerateToken),
-		setup:    setup,
-		savedEnv: envText,
+	a := newApp(setup.Description, values, ParseEnv(envText), filepath.Base(setup.EnvPath), GenerateToken)
+	a.suggestFunc = setup.Suggest
+	for _, action := range setup.Actions {
+		a.actions = append(a.actions, actionInfo{title: action.Title, description: action.Description})
 	}
-	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
+	model := &model{app: a, setup: setup, savedEnv: envText}
+	model.program = tea.NewProgram(model, tea.WithAltScreen())
+	_, err = model.program.Run()
 	return err
 }
 
@@ -66,6 +74,17 @@ type model struct {
 	setup         Setup
 	savedEnv      string
 	width, height int
+	program       *tea.Program
+	// reply answers the running action's open question; cancel stops it.
+	reply  chan<- *string
+	cancel *atomic.Bool
+}
+
+// actionMsg is what a running action's goroutine tells the screen.
+type actionMsg struct {
+	event actionEvent
+	// reply, with an ask, takes the answer (nil: stopped).
+	reply chan<- *string
 }
 
 func (m *model) Init() tea.Cmd { return nil }
@@ -74,6 +93,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+	case actionMsg:
+		if msg.reply != nil {
+			m.reply = msg.reply
+		}
+		m.app.actionEvent(msg.event)
 	case tea.KeyMsg:
 		for _, press := range presses(msg) {
 			switch m.app.key(press.key, press.runes) {
@@ -82,10 +106,93 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case saveEffect:
 				notice, err := m.save()
 				m.app.saved(notice, err)
+			case runActionEffect:
+				m.runAction(m.app.pendingAction)
+			case answerEffect:
+				m.answer(&m.app.answer)
+			case cancelEffect:
+				if m.cancel != nil {
+					m.cancel.Store(true)
+				}
+				m.answer(nil)
 			}
 		}
 	}
 	return m, nil
+}
+
+// answer answers the running action's open question (nil: stopped).
+func (m *model) answer(text *string) {
+	if m.reply == nil {
+		return
+	}
+	reply := m.reply
+	m.reply = nil
+	if text != nil {
+		answer := *text
+		text = &answer
+	}
+	reply <- text
+}
+
+// runAction starts action index on the saved files (saving the changes
+// first), on its own goroutine.
+func (m *model) runAction(index int) {
+	if m.app.dirty {
+		notice, err := m.save()
+		if err != nil {
+			m.app.notStarted(err)
+			return
+		}
+		m.app.saved(notice, nil)
+	}
+	config, env := m.app.candidate()
+	candidate := Candidate{Config: config, Env: ParseEnv(env).Vars()}
+	m.cancel = &atomic.Bool{}
+	session := &channelSession{program: m.program, cancelled: m.cancel}
+	action := m.setup.Actions[index]
+	m.app.started(index)
+	go func() {
+		notice, err := func() (notice string, err error) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					err = fmt.Errorf("The action failed unexpectedly: %v", recovered)
+				}
+			}()
+			return action.Run(session, candidate)
+		}()
+		m.program.Send(actionMsg{event: actionEvent{done: true, notice: notice, err: err}})
+	}()
+}
+
+// channelSession is a Session over the program's messages.
+type channelSession struct {
+	program   *tea.Program
+	cancelled *atomic.Bool
+}
+
+func (s *channelSession) send(event actionEvent) { s.program.Send(actionMsg{event: event}) }
+
+func (s *channelSession) Say(text string)      { s.send(actionEvent{say: text}) }
+func (s *channelSession) QR(data string)       { s.send(actionEvent{qr: data}) }
+func (s *channelSession) Progress(text string) { s.send(actionEvent{progress: text}) }
+func (s *channelSession) Cancelled() bool      { return s.cancelled.Load() }
+
+func (s *channelSession) Ask(prompt string) (string, bool) { return s.ask(prompt, false) }
+
+func (s *channelSession) AskSecret(prompt string) (string, bool) { return s.ask(prompt, true) }
+
+func (s *channelSession) ask(prompt string, secret bool) (string, bool) {
+	if s.Cancelled() {
+		return "", false
+	}
+	reply := make(chan *string, 1)
+	s.program.Send(actionMsg{event: actionEvent{ask: &question{prompt: prompt, secret: secret}}, reply: reply})
+	answer := <-reply
+	if answer == nil {
+		return "", false
+	}
+	return *answer, true
 }
 
 // keyPress is one key as the app takes it: its name and the text it types.

@@ -24,14 +24,19 @@ type screen struct {
 	path   []seg
 	title  string
 	cursor int
+	// domain: a list of values from a domain (chats), its items picked by
+	// search.
+	domain string
 }
 
-// row is one line of a screen: an entry of a table, or an item of a list or
-// a map.
+// row is one line of a screen: an entry of a table, an item of a list or a
+// map, or one of the host's actions (on the root screen).
 type row struct {
-	entry *describe.Entry
-	item  *seg
-	label string
+	entry    *describe.Entry
+	item     *seg
+	label    string
+	isAction bool
+	action   int
 }
 
 func (r row) title() string {
@@ -50,6 +55,8 @@ const (
 	confirming
 	messaging
 	helping
+	// runningMode: an action running, or done (closed by any key).
+	runningMode
 )
 
 type targetKind int
@@ -58,6 +65,8 @@ const (
 	valueTarget targetKind = iota
 	envTarget
 	nameTarget
+	// appendTarget: a new item at the end of the list of values at path.
+	appendTarget
 )
 
 type edit struct {
@@ -70,6 +79,13 @@ type edit struct {
 	secret bool
 	// note is what an empty input means, or the last error.
 	note string
+	// domain is where the value comes from: the input searches it.
+	domain      string
+	suggestions []Suggestion
+	// highlight is the suggestion Enter picks, -1 for none.
+	highlight int
+	// unsuggested is why there are no suggestions, when the host says.
+	unsuggested string
 }
 
 type choose struct {
@@ -101,6 +117,13 @@ const (
 	// saveEffect: check the candidate files and write them, then call saved.
 	saveEffect
 	quitEffect
+	// runActionEffect: save when there are changes, then start the action
+	// pendingAction (and call started).
+	runActionEffect
+	// answerEffect: answer the running action's question with answer.
+	answerEffect
+	// cancelEffect: ask the running action to stop.
+	cancelEffect
 )
 
 // shownKind is how a row's value reads.
@@ -177,6 +200,16 @@ type app struct {
 	// status is a one-line notice, until the next key.
 	status string
 	token  func() (string, error)
+	// suggestFunc gives the host's values of a domain; nil for none.
+	suggestFunc SuggestFunc
+	// labels are the labels of domain values seen in suggestions.
+	labels  map[string]string
+	actions []actionInfo
+	running running
+	// pendingAction is the action runActionEffect starts; answer is what
+	// answerEffect answers.
+	pendingAction int
+	answer        string
 }
 
 func newApp(description *describe.Description, values map[string]any, env *EnvFile, envName string,
@@ -191,6 +224,7 @@ func newApp(description *describe.Description, values map[string]any, env *EnvFi
 		envName:     envName,
 		screens:     []screen{{title: description.Title}},
 		token:       token,
+		labels:      map[string]string{},
 	}
 }
 
@@ -230,11 +264,18 @@ func (a *app) nodeAt(path []seg) *describe.Node {
 			node = node.List
 		case node.Map != nil && !s.isIndex:
 			node = node.Map
+		// A list of values from a domain opens as a screen of items.
+		case isTextList(node) && s.isIndex:
+			node = &describe.Node{Value: &describe.Value{Kind: describe.Text}}
 		default:
 			return nil
 		}
 	}
 	return node
+}
+
+func isTextList(node *describe.Node) bool {
+	return node.Value != nil && node.Value.Kind == describe.TextList
 }
 
 func (a *app) rows() []row {
@@ -248,6 +289,16 @@ func (a *app) rows() []row {
 	case node.Table != nil:
 		for index := range node.Table.Entries {
 			rows = append(rows, row{entry: &node.Table.Entries[index]})
+		}
+		if len(path) == 0 {
+			for index, action := range a.actions {
+				rows = append(rows, row{isAction: true, action: index, label: "▶ " + action.title})
+			}
+		}
+	case isTextList(node):
+		for index, item := range asList(get(a.values, path)) {
+			s := indexSeg(index)
+			rows = append(rows, row{item: &s, label: a.labelFor(a.screen().domain, fmt.Sprint(item))})
 		}
 	case node.List != nil:
 		items, _ := get(a.values, path).([]any)
@@ -272,12 +323,15 @@ func (a *app) rows() []row {
 
 func (a *app) isCollection() bool {
 	node := a.nodeAt(a.screen().path)
-	return node != nil && (node.List != nil || node.Map != nil)
+	return node != nil && (node.List != nil || node.Map != nil || isTextList(node))
 }
 
 func (a *app) child(s seg) []seg { return extend(a.screen().path, s) }
 
 func (a *app) shown(r row) shown {
+	if r.isAction {
+		return shown{shownOpens, "run"}
+	}
 	if r.entry == nil {
 		return shown{kind: shownOpens}
 	}
@@ -331,6 +385,11 @@ func (a *app) envOf(entry *describe.Entry) (name, value string, named, set bool)
 
 // details is the details pane: the selected row's description and facts.
 func (a *app) details(r row) (string, []string) {
+	if r.isAction {
+		action := a.actions[r.action]
+		return action.title, []string{action.description,
+			"Enter: run (changes are saved first) · esc while it runs: stop"}
+	}
 	if r.entry == nil {
 		return r.label, []string{"Enter: open · d: delete"}
 	}
@@ -347,7 +406,11 @@ func (a *app) details(r row) (string, []string) {
 		case describe.Int:
 			facts = append(facts, fmt.Sprintf("A whole number from %d to %d", v.Min, v.Max))
 		case describe.TextList:
-			facts = append(facts, "A list: values separated by commas")
+			if entry.Domain != "" {
+				facts = append(facts, "A list: enter opens it, a adds an item by search")
+			} else {
+				facts = append(facts, "A list: values separated by commas")
+			}
 		case describe.JSON:
 			facts = append(facts, "Written as JSON")
 		case describe.EnvVar:
@@ -407,6 +470,10 @@ func (a *app) hints() string {
 // runes are typed text.
 func (a *app) key(key string, runes []rune) effect {
 	a.status = ""
+	if a.mode == runningMode {
+		// While an action runs, keys go to it (ctrl+c stops it).
+		return a.runningKey(key, runes)
+	}
 	if key == "ctrl+c" {
 		return quitEffect
 	}
@@ -448,6 +515,10 @@ func (a *app) browse(key string) effect {
 	case "end":
 		s.cursor = last
 	case "enter", "right", "l":
+		if current != nil && current.isAction {
+			a.pendingAction = current.action
+			return runActionEffect
+		}
 		if current != nil {
 			a.activate(*current)
 		}
@@ -492,6 +563,23 @@ func (a *app) browse(key string) effect {
 }
 
 func (a *app) activate(r row) {
+	if r.item != nil && a.screen().domain != "" {
+		// An item of a list of domain values is edited by search.
+		domain := a.screen().domain
+		path := a.child(*r.item)
+		current, _ := get(a.values, path).(string)
+		a.mode = editing
+		a.edit = edit{
+			title:  r.label,
+			target: valueTarget,
+			path:   path,
+			node:   describe.Node{Value: &describe.Value{Kind: describe.Text}},
+			input:  newInput(current),
+			note:   "Type to search; enter picks the highlighted match or what is typed.",
+		}
+		a.searching(domain)
+		return
+	}
 	if r.item != nil {
 		a.open(*r.item, r.label)
 		return
@@ -516,6 +604,10 @@ func (a *app) activate(r row) {
 		}
 		a.mode = choosing
 		a.choose = choose{title: entry.Title, path: path, options: v.Choices, cursor: cursor}
+	case v != nil && v.Kind == describe.TextList && entry.Domain != "":
+		// Its items are picked by search, one by one.
+		a.open(keySeg(entry.Key), entry.Title)
+		a.screen().domain = entry.Domain
 	case entry.Node.IsValue():
 		text := ""
 		if current := get(a.values, path); current != nil {
@@ -537,6 +629,9 @@ func (a *app) activate(r row) {
 			input:  newInput(text),
 			secret: v != nil && v.Kind == describe.Secret,
 			note:   note,
+		}
+		if entry.Domain != "" {
+			a.searching(entry.Domain)
 		}
 	default:
 		a.open(keySeg(entry.Key), entry.Title)
@@ -562,6 +657,15 @@ func (a *app) add() {
 	case node.Map != nil:
 		a.mode = editing
 		a.edit = edit{title: "New entry's name", target: nameTarget, path: path, note: "Its key in the file."}
+	case isTextList(node):
+		a.mode = editing
+		a.edit = edit{
+			title:  "Add to " + a.screen().title,
+			target: appendTarget,
+			path:   path,
+			note:   "Type to search; enter adds the highlighted match or what is typed.",
+		}
+		a.searching(a.screen().domain)
 	}
 }
 
@@ -617,20 +721,38 @@ func (a *app) setToken(name string) {
 }
 
 func (a *app) editKey(key string, runes []rune) {
-	switch key {
-	case "esc":
+	count := len(a.edit.suggestions)
+	switch {
+	case key == "esc":
 		return
-	case "enter":
+	case key == "enter":
+		// The highlighted match is what Enter takes.
+		if a.edit.domain != "" && a.edit.highlight >= 0 && a.edit.highlight < count {
+			a.edit.input = newInput(a.edit.suggestions[a.edit.highlight].Value)
+		}
 		if err := a.commit(); err != nil {
 			a.edit.note = err.Error()
 			a.mode = editing
 		}
 		return
+	case (key == "down" || key == "tab") && count > 0:
+		a.edit.highlight = min(a.edit.highlight+1, count-1)
+		a.mode = editing
+		return
+	case (key == "up" || key == "shift+tab") && count > 0:
+		a.edit.highlight = max(a.edit.highlight-1, -1)
+		a.mode = editing
+		return
 	}
+	before := string(a.edit.input.text)
 	if len(runes) > 0 && !strings.HasPrefix(key, "ctrl+") && !strings.HasPrefix(key, "alt+") {
 		a.edit.input.insert(runes)
 	} else {
 		a.edit.input.key(key)
+	}
+	if string(a.edit.input.text) != before {
+		a.edit.highlight = -1
+		a.refreshSuggestions()
 	}
 	a.mode = editing
 }
@@ -638,6 +760,14 @@ func (a *app) editKey(key string, runes []rune) {
 func (a *app) commit() error {
 	text := string(a.edit.input.text)
 	switch a.edit.target {
+	case appendTarget:
+		item := strings.TrimSpace(text)
+		if item == "" {
+			return fmt.Errorf("Type or pick a value.")
+		}
+		items := append(append([]any(nil), asList(get(a.values, a.edit.path))...), item)
+		set(a.values, a.edit.path, items)
+		a.screen().cursor = len(items) - 1
 	case valueTarget:
 		if strings.TrimSpace(text) == "" {
 			remove(a.values, a.edit.path)

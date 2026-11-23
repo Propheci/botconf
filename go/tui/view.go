@@ -147,8 +147,30 @@ func popupView(a *app, width int) string {
 		if cursor < len(runes) {
 			line = string(runes[skip:cursor]) + selected.Render(string(runes[cursor])) + string(runes[cursor+1:])
 		}
-		return frame(a.edit.title, truncate(line, width-4)+"\n"+dim.Render(a.edit.note),
-			"enter save · esc cancel · ctrl+u clear")
+		body := truncate(line, width-4) + "\n" + dim.Render(a.edit.note)
+		bottom := "enter save · esc cancel · ctrl+u clear"
+		if a.edit.domain != "" {
+			bottom = "↓↑ pick · enter save · esc cancel"
+			if len(a.edit.suggestions) == 0 {
+				why := a.edit.unsuggested
+				if why == "" {
+					why = "No matches."
+				}
+				body += "\n" + warn.Render(why)
+			}
+			for index, suggestion := range a.edit.suggestions {
+				label := truncate(suggestion.Label, width-4)
+				if index == a.edit.highlight {
+					label = selected.Render(label)
+				} else {
+					label = opens.Render(label)
+				}
+				body += "\n" + label
+			}
+		}
+		return frame(a.edit.title, body, bottom)
+	case runningMode:
+		return runningView(a, width)
 	case choosing:
 		var lines []string
 		for index, option := range a.choose.options {
@@ -181,4 +203,45 @@ func truncate(line string, width int) string {
 		return ""
 	}
 	return lipgloss.NewStyle().MaxWidth(width).Render(line)
+}
+
+// runningView is a running action: what it said, its QR code, its progress
+// and its question.
+func runningView(a *app, width int) string {
+	r := &a.running
+	var lines []string
+	if r.qr != "" {
+		if qr, ok := qrLines(r.qr); ok {
+			lines = append(lines, qr...)
+		} else {
+			lines = append(lines, warn.Render("The QR code could not be drawn."))
+		}
+	}
+	lines = append(lines, r.lines...)
+	if r.progress != "" {
+		lines = append(lines, opens.Render(r.progress))
+	}
+	if r.cancelling {
+		lines = append(lines, warn.Render("Stopping…"))
+	}
+	bottom := "esc stop"
+	if q := r.question; q != nil {
+		shown := string(q.input.text)
+		if q.secret {
+			shown = strings.Repeat("•", len(q.input.text))
+		}
+		lines = append(lines, bold.Render(q.prompt), shown+selected.Render(" "))
+		bottom = "enter answer · esc stop"
+	}
+	if r.done {
+		bottom = "done · any key"
+		if r.err != nil {
+			bottom = "failed · any key"
+			lines = append(lines, bad.Render(r.err.Error()))
+		} else {
+			lines = append(lines, r.notice)
+		}
+	}
+	content := bold.Render(r.title) + "\n" + strings.Join(lines, "\n") + "\n" + dim.Render(bottom)
+	return box.Width(max(width-2, 10)).Render(content)
 }
