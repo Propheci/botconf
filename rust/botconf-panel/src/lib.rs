@@ -377,6 +377,32 @@ pub enum PanelError {
 /// A short note about a section, e.g. `off` for a disabled feature.
 pub type SectionNote<S> = Arc<dyn Fn(&Snapshot<S>, &str) -> Option<String> + Send + Sync>;
 
+/// Something the host can do for a section, offered as a button on its page
+/// (e.g. `🔄 Resync` on a connector's section), rather than a setting.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SectionAction {
+    /// Names the action to the host's handler.
+    pub id: String,
+    /// The button's label.
+    pub title: String,
+}
+
+/// The actions a section (by id) offers now.
+pub type SectionActions<S> = Arc<dyn Fn(&Snapshot<S>, &str) -> Vec<SectionAction> + Send + Sync>;
+
+/// A press on a section action, for the host's handler.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActionCall {
+    pub section: String,
+    pub action: String,
+    /// Who pressed it (the viewer's actor).
+    pub actor: Option<String>,
+}
+
+/// Runs a section action: `Ok` is what to tell the user, `Err` why it failed.
+pub type ActionHandler =
+    Arc<dyn Fn(ActionCall) -> BoxFuture<'static, Result<String, String>> + Send + Sync>;
+
 /// The current time, in milliseconds since the Unix epoch.
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
@@ -387,6 +413,8 @@ pub struct Panel<S: Schema> {
     domains: Vec<Domain>,
     command: String,
     section_note: Option<SectionNote<S>>,
+    section_actions: Option<SectionActions<S>>,
+    on_action: Option<ActionHandler>,
     stored_label: String,
     clock: Clock,
 }
@@ -403,6 +431,8 @@ impl<S: Schema> Panel<S> {
             domains: Vec::new(),
             command: "config".into(),
             section_note: None,
+            section_actions: None,
+            on_action: None,
             stored_label: "changed at runtime ✏️".into(),
             clock: Arc::new(system_now),
         }
@@ -445,6 +475,31 @@ impl<S: Schema> Panel<S> {
         note: impl Fn(&Snapshot<S>, &str) -> Option<String> + Send + Sync + 'static,
     ) -> Self {
         self.section_note = Some(Arc::new(note));
+        self
+    }
+
+    /// The actions a section offers, as buttons on its page after its
+    /// settings. Asked on every draw, so they may come and go.
+    #[must_use]
+    pub fn section_actions(
+        mut self,
+        actions: impl Fn(&Snapshot<S>, &str) -> Vec<SectionAction> + Send + Sync + 'static,
+    ) -> Self {
+        self.section_actions = Some(Arc::new(actions));
+        self
+    }
+
+    /// Runs a pressed section action. Its text becomes the press's notice
+    /// (`❌ <text>` for an error), and the section is redrawn.
+    #[must_use]
+    pub fn on_action(
+        mut self,
+        handler: impl Fn(ActionCall) -> BoxFuture<'static, Result<String, String>>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        self.on_action = Some(Arc::new(handler));
         self
     }
 
@@ -514,6 +569,13 @@ impl<S: Schema> Panel<S> {
 
     pub(crate) fn note(&self, snapshot: &Snapshot<S>, id: &str) -> Option<String> {
         self.section_note.as_ref()?(snapshot, id)
+    }
+
+    pub(crate) fn actions(&self, snapshot: &Snapshot<S>, id: &str) -> Vec<SectionAction> {
+        self.section_actions
+            .as_ref()
+            .map(|actions| actions(snapshot, id))
+            .unwrap_or_default()
     }
 }
 

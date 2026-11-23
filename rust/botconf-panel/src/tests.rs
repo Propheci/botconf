@@ -10,7 +10,8 @@ use botconf::{DynamicSection, Kind, RuntimeSetting};
 use serde_json::{Value, json};
 
 use crate::{
-    Action, AskKind, Input, Limits, Page, Panel, PanelError, Question, Reaction, Screen, Target,
+    Action, ActionCall, AskKind, Input, Limits, Page, Panel, PanelError, Question, Reaction,
+    Screen, SectionAction, Target,
     testing::{FLAVOURS, FakeNames, LIMITS, Toy, panel, viewer},
     tokens::{HANDLE_LEN, MemoryTokenStore},
 };
@@ -1005,4 +1006,142 @@ async fn back_from_a_draft_question_keeps_the_draft() {
     assert!(text(&back).contains("X: 1"), "{}", text(&back));
     assert!(labels(&back).iter().any(|label| label == "💾 Save"));
     assert_eq!(value(&panel, "routes.r1"), None);
+}
+
+/// A panel whose `lamp` section offers `flash` (which works) and `fail`
+/// (which does not) while `offered` holds, recording each call.
+async fn panel_with_actions(
+    offered: Arc<std::sync::atomic::AtomicBool>,
+) -> (Panel<Toy>, Arc<std::sync::Mutex<Vec<ActionCall>>>) {
+    let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&calls);
+    let panel = panel()
+        .await
+        .section_actions(move |_, id| {
+            if id != "lamp" || !offered.load(Ordering::SeqCst) {
+                return Vec::new();
+            }
+            ["flash", "fail"]
+                .into_iter()
+                .map(|action| SectionAction {
+                    id: action.into(),
+                    title: format!("⚡ {action}"),
+                })
+                .collect()
+        })
+        .on_action(move |call| {
+            recorded.lock().unwrap().push(call.clone());
+            Box::pin(async move {
+                match call.action.as_str() {
+                    "flash" => Ok("Flashed".to_string()),
+                    _ => Err("down".to_string()),
+                }
+            })
+        });
+    (panel, calls)
+}
+
+fn lamp() -> Page {
+    Page::Section("lamp".into())
+}
+
+#[tokio::test]
+async fn a_section_lists_its_actions() {
+    let offered = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let (panel, _) = panel_with_actions(offered).await;
+    let screen = render(&panel, &lamp()).await;
+    let shown = labels(&screen);
+    let flash = shown.iter().position(|label| label == "⚡ flash").unwrap();
+    assert_eq!(shown[flash + 1], "⚡ fail");
+    // After the section's settings, before ‹ Back.
+    assert!(flash > 0, "{shown:?}");
+    assert_eq!(shown.last().map(String::as_str), Some("‹ Back"));
+    assert_eq!(
+        action(&find(&screen, "⚡ flash")),
+        Action::Run("lamp".into(), "flash".into())
+    );
+    // Other pages offer none.
+    let home = render(&panel, &Page::Home).await;
+    assert!(!labels(&home).iter().any(|label| label.starts_with('⚡')));
+}
+
+#[tokio::test]
+async fn pressing_an_action_runs_it() {
+    let offered = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let (panel, calls) = panel_with_actions(offered).await;
+    let token = find(&render(&panel, &lamp()).await, "⚡ flash");
+    let reaction = press(&panel, &token).await;
+    assert_eq!(reaction.notice.as_deref(), Some("Flashed"));
+    let screen = reaction.screen.expect("the section is redrawn");
+    assert!(text(&screen).contains("Lamp"), "{}", text(&screen));
+    assert_eq!(
+        *calls.lock().unwrap(),
+        [ActionCall {
+            section: "lamp".into(),
+            action: "flash".into(),
+            actor: Some("1".into()),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn a_failed_action_says_so() {
+    let offered = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let (panel, _) = panel_with_actions(offered).await;
+    let token = find(&render(&panel, &lamp()).await, "⚡ fail");
+    let reaction = press(&panel, &token).await;
+    assert_eq!(reaction.notice.as_deref(), Some("❌ down"));
+    assert!(reaction.screen.is_some());
+}
+
+#[tokio::test]
+async fn an_action_no_longer_offered_is_stale() {
+    let offered = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let (panel, calls) = panel_with_actions(Arc::clone(&offered)).await;
+    let token = find(&render(&panel, &lamp()).await, "⚡ flash");
+    offered.store(false, Ordering::SeqCst);
+    let error = panel
+        .press(&token, &viewer(&FakeNames, &LIMITS))
+        .await
+        .unwrap_err();
+    let PanelError::Stale { notice, screen } = error else {
+        panic!("stale, not {error:?}");
+    };
+    assert_eq!(notice, "This action is no longer offered");
+    assert!(!labels(&screen).iter().any(|label| label.starts_with('⚡')));
+    assert!(calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn without_a_handler_an_action_is_rejected() {
+    let panel = panel().await;
+    let token = Action::Run("lamp".into(), "flash".into()).encode();
+    let error = panel
+        .press(&token, &viewer(&FakeNames, &LIMITS))
+        .await
+        .unwrap_err();
+    assert!(matches!(error, PanelError::Rejected(_)), "{error:?}");
+}
+
+#[tokio::test]
+async fn a_long_action_takes_a_stored_handle() {
+    let long = "a".repeat(80);
+    let panel = panel()
+        .await
+        .section_actions({
+            let long = long.clone();
+            move |_, _| {
+                vec![SectionAction {
+                    id: long.clone(),
+                    title: "Long".into(),
+                }]
+            }
+        })
+        .on_action(|call| Box::pin(async move { Ok(format!("ran {}", call.action.len())) }));
+    let token = find(&render(&panel, &lamp()).await, "Long");
+    assert!(token.len() <= LIMITS.token_bytes, "{token}");
+    assert_eq!(
+        press(&panel, &token).await.notice.as_deref(),
+        Some("ran 80")
+    );
 }

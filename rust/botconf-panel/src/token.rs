@@ -211,6 +211,9 @@ pub enum Action {
     },
     /// Stores the draft `value` of the form at the target.
     SaveDraft(Target, Value),
+    /// Runs the host's action (by id) offered on a section (by id); see
+    /// [`crate::SectionAction`].
+    Run(String, String),
 }
 
 impl Action {
@@ -246,6 +249,7 @@ impl Action {
                 format!("D:{}:{}", escape(&value.to_string()), then.encode())
             }
             Self::SaveDraft(to, draft) => value("S", to, draft),
+            Self::Run(section, action) => format!("X:{}:{}", escape(section), escape(action)),
         }
     }
 
@@ -286,6 +290,7 @@ impl Action {
                 then: Box::new(Self::parse(then)?),
             },
             ("S", Some(draft)) => Self::SaveDraft(target()?, serde_json::from_str(draft).ok()?),
+            ("X", Some(action)) => Self::Run(unescape(second?), unescape(action)),
             ("R", None) if second.is_none() => Self::Reload,
             ("x", None) if second.is_none() => Self::Close,
             _ => return None,
@@ -409,6 +414,8 @@ mod tests {
                 then: Box::new(Action::open(Page::Setting(field.clone()))),
             },
             Action::SaveDraft(entry.clone(), json!({"kind": "b", "y": "a:b"})),
+            Action::Run("connector:wa-1".into(), "resync".into()),
+            Action::Run("a:b#c%e".into(), "x:y".into()),
         ] {
             let token = action.encode();
             assert_eq!(Action::parse(&token), Some(action), "{token}");

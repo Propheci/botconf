@@ -5,7 +5,7 @@ use serde_json::Value;
 use botconf::{Catalog, Choices, Kind, Schema, SettingsError};
 
 use crate::{
-    Input, Panel, PanelError, Question, Reaction, Screen, Viewer,
+    ActionCall, Input, Panel, PanelError, Question, Reaction, Screen, Viewer,
     edit::{self, Edit},
     setting::Setting,
     text::Text,
@@ -18,6 +18,8 @@ const NO_CHOICE: &str = "This choice no longer exists";
 const LIST_CHANGED: &str = "This list changed";
 const OUT_OF_DATE: &str = "This panel is out of date";
 const NOT_IN_DRAFT: &str = "This button does not work on a draft";
+const NOT_OFFERED: &str = "This action is no longer offered";
+const NO_ACTIONS: &str = "This panel runs no actions";
 /// Shown when a new entry opens a draft.
 pub(crate) const FILL_IN: &str = "📝 Fill in the fields, then 💾 Save";
 
@@ -39,6 +41,44 @@ enum DraftProblem {
 }
 
 impl<S: Schema> Panel<S> {
+    /// Runs a section action the section still offers, through the host's
+    /// handler, and redraws the section with what it said.
+    async fn run(
+        &self,
+        section: String,
+        action: String,
+        viewer: &Viewer<'_>,
+    ) -> Result<Reaction<S>, PanelError> {
+        let Some(handler) = self.on_action.clone() else {
+            return Err(PanelError::Rejected(NO_ACTIONS.into()));
+        };
+        let page = Page::Section(section.clone());
+        let offered = self
+            .actions(&self.store.current(), &section)
+            .iter()
+            .any(|offered| offered.id == action);
+        if !offered {
+            return Err(PanelError::Stale {
+                notice: NOT_OFFERED.into(),
+                screen: self.render(&page, viewer).await,
+            });
+        }
+        let outcome = handler(ActionCall {
+            section,
+            action,
+            actor: viewer.actor.clone(),
+        })
+        .await;
+        let notice = match outcome {
+            Ok(text) => text,
+            Err(text) => format!("❌ {text}"),
+        };
+        Ok(Reaction {
+            notice: Some(notice),
+            ..Reaction::screen(self.render(&page, viewer).await)
+        })
+    }
+
     /// A button was pressed: `token` is what it carried.
     pub async fn press(&self, token: &str, viewer: &Viewer<'_>) -> Result<Reaction<S>, PanelError> {
         let redeemed = self
@@ -76,6 +116,7 @@ impl<S: Schema> Panel<S> {
             }),
             Action::Ask(target, ask) => self.ask(Question::new(target, ask), viewer).await,
             Action::InDraft { value, then } => self.press_in_draft(value, *then, viewer).await,
+            Action::Run(section, action) => self.run(section, action, viewer).await,
             Action::SaveDraft(target, value) => {
                 let catalog = self.store.catalog();
                 let setting = Setting::resolve(&catalog, &target)
@@ -483,7 +524,8 @@ impl<S: Schema> Panel<S> {
             | Action::Ask(..)
             | Action::Close
             | Action::InDraft { .. }
-            | Action::SaveDraft(..) => unreachable!("handled by press"),
+            | Action::SaveDraft(..)
+            | Action::Run(..) => unreachable!("handled by press"),
         };
         Ok((edit, Page::Setting(target)))
     }

@@ -233,9 +233,15 @@ impl<S: Schema> Panel<S> {
             text.push_plain(format!("\n\nNote: {note}."));
         }
 
+        let mut rows = self.setting_rows(snapshot, catalog, Some(id));
+        rows.extend(
+            self.actions(snapshot, id)
+                .into_iter()
+                .map(|action| vec![btn(action.title, Action::Run(id.to_owned(), action.id))]),
+        );
         Building {
             text,
-            rows: self.setting_rows(snapshot, catalog, Some(id)),
+            rows,
             nav: vec![btn("‹ Back", Action::open(Page::Home))],
         }
     }
