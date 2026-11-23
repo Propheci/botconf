@@ -1,0 +1,159 @@
+// Package tui is an offline setup screen for a program's config file and the
+// env file its options name, over the program's describe.Description: every
+// option with its description, edited without the program running. It is
+// the Go side of the Rust `botconf-tui`.
+//
+// The file is written from the description, so it always reads like the
+// generated example; keys the description does not know are kept as
+// comments. An option naming an environment variable sets that variable's
+// value in the env file (masked when secret; a token can be generated); the
+// env file keeps its other lines. Before anything is written the host checks
+// the candidate with its own loader.
+package tui
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/pelletier/go-toml/v2"
+	"github.com/propheci/botconf/go/describe"
+)
+
+// Candidate is what a save is checked against: the config file and the env
+// file's variables, as they would be written.
+type Candidate struct {
+	Config string
+	Env    map[string]string
+}
+
+// Setup is what Run edits.
+type Setup struct {
+	Description *describe.Description
+	ConfigPath  string
+	EnvPath     string
+	// Validate is the host's check of a candidate: its loader, say. An error
+	// is shown and nothing is written.
+	Validate func(Candidate) error
+}
+
+// Run opens the setup screen until the user quits. A missing file starts
+// empty; a config file that is not TOML is an error (fix it first).
+func Run(setup Setup) error {
+	values, err := readConfig(setup.ConfigPath)
+	if err != nil {
+		return err
+	}
+	envText, err := readOptional(setup.EnvPath)
+	if err != nil {
+		return err
+	}
+	model := &model{
+		app:      newApp(setup.Description, values, ParseEnv(envText), filepath.Base(setup.EnvPath), GenerateToken),
+		setup:    setup,
+		savedEnv: envText,
+	}
+	_, err = tea.NewProgram(model, tea.WithAltScreen()).Run()
+	return err
+}
+
+// model adapts the app to bubbletea.
+type model struct {
+	app           *app
+	setup         Setup
+	savedEnv      string
+	width, height int
+}
+
+func (m *model) Init() tea.Cmd { return nil }
+
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+	case tea.KeyMsg:
+		var runes []rune
+		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+			runes = msg.Runes
+		}
+		switch m.app.key(msg.String(), runes) {
+		case quitEffect:
+			return m, tea.Quit
+		case saveEffect:
+			notice, err := m.save()
+			m.app.saved(notice, err)
+		}
+	}
+	return m, nil
+}
+
+func (m *model) View() string { return view(m.app, m.width, m.height) }
+
+// save checks, then writes the config file and (when it changed) the env
+// file.
+func (m *model) save() (string, error) {
+	config, env := m.app.candidate()
+	if m.setup.Validate != nil {
+		if err := m.setup.Validate(Candidate{Config: config, Env: ParseEnv(env).Vars()}); err != nil {
+			return "", err
+		}
+	}
+	if err := write(m.setup.ConfigPath, config, false); err != nil {
+		return "", fmt.Errorf("writing %s: %w", m.setup.ConfigPath, err)
+	}
+	notice := "Saved " + m.setup.ConfigPath
+	if env != m.savedEnv {
+		if err := write(m.setup.EnvPath, env, true); err != nil {
+			return "", fmt.Errorf("writing %s: %w", m.setup.EnvPath, err)
+		}
+		m.savedEnv = env
+		notice += " and " + m.setup.EnvPath
+	}
+	return notice, nil
+}
+
+func readConfig(path string) (map[string]any, error) {
+	text, err := readOptional(path)
+	if err != nil {
+		return nil, err
+	}
+	values := map[string]any{}
+	if strings.TrimSpace(text) == "" {
+		return values, nil
+	}
+	if err := toml.Unmarshal([]byte(text), &values); err != nil {
+		return nil, fmt.Errorf("%s is not valid TOML: %w", path, err)
+	}
+	return values, nil
+}
+
+func readOptional(path string) (string, error) {
+	text, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	return string(text), err
+}
+
+// write writes through a temporary file, so a crash leaves the old file
+// whole. A new private file is readable by its owner only.
+func write(path, text string, private bool) error {
+	mode := os.FileMode(0o644)
+	if private {
+		mode = 0o600
+	}
+	if info, err := os.Stat(path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	temporary := path + ".tmp"
+	if err := os.WriteFile(temporary, []byte(text), mode); err != nil {
+		return err
+	}
+	if err := os.Chmod(temporary, mode); err != nil {
+		return err
+	}
+	return os.Rename(temporary, path)
+}
