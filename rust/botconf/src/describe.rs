@@ -23,7 +23,8 @@
 //! | Attribute | On | Meaning |
 //! |---|---|---|
 //! | `title = "…"` | field, variant | The title, instead of the key in words |
-//! | `runtime` | field | Can change at runtime: one of [`Description::runtime_settings`] |
+//! | `runtime` | field | Can change at runtime: one of [`Description::runtime_settings`], described by the doc comment's first paragraph |
+//! | `per_entry` | field | A runtime map whose entries are set one by one (implies `runtime`) |
 //! | `panel = <Kind>` | field | The runtime setting's panel editor, instead of the value kind's |
 //! | `secret` | field, type | A secret value: masked on screens |
 //! | `env`, `env = token \| secret \| plain` | field | Names an environment variable holding the value (a token can be generated) |
@@ -87,6 +88,8 @@ pub struct Entry {
     /// The value can be null (an `Option`): a runtime setting of it can be
     /// cleared.
     pub nullable: bool,
+    /// A runtime map whose entries are set one by one (`<key>.<name>`).
+    pub per_entry: bool,
     /// The panel editor of a runtime setting, when the value kind's is not
     /// enough (a reference, a form).
     pub panel_kind: Option<Kind>,
@@ -180,6 +183,7 @@ impl Entry {
             hint: None,
             runtime: false,
             nullable: false,
+            per_entry: false,
             panel_kind: None,
         }
     }
@@ -283,14 +287,23 @@ fn collect_runtime(table: &Table, prefix: &str, settings: &mut Vec<RuntimeSettin
             settings.push(RuntimeSetting {
                 key: Shared::new(key.as_str()),
                 title: Some(Shared::new(entry.title.as_str())),
-                description: Shared::new(entry.description.as_str()),
-                per_entry: false,
+                // The first paragraph: a panel shows the summary, the file and a
+                // setup screen the whole.
+                description: Shared::new(summary(&entry.description)),
+                per_entry: entry.per_entry,
                 kind,
             });
         } else if let Node::Table(inner) = &entry.node {
             collect_runtime(inner, &key, settings);
         }
     }
+}
+
+/// A description's first paragraph.
+fn summary(description: &str) -> &str {
+    description
+        .split_once("\n\n")
+        .map_or(description, |(first, _)| first)
 }
 
 /// The panel editor for a value kind.

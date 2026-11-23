@@ -681,3 +681,10 @@ each is marked in its plan):
     crossterm, getrandom, toml) were not checked with
     `-Z direct-minimal-versions`.
   Skipped: `nix flake check` (CI runs it).
+
+- **`v0.13.1`, `go/v0.13.1` (2026-11-23), for wuphf 059.** `#[botconf(per_entry)]`
+  (`Entry::per_entry`: a runtime map set entry by entry, as
+  `RuntimeSetting::per_entry`), and a derived runtime setting is described by
+  its doc comment's first paragraph (Go: the `doc` tag's), so a panel shows
+  the summary while the file and the setup screen show the whole. botconf
+  and botconf-derive tests, clippy and the Go describe tests clean.

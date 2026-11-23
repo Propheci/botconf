@@ -230,6 +230,9 @@ impl Cx<'_> {
         if botconf.runtime {
             sets.push(quote!(entry.runtime = true;));
         }
+        if botconf.per_entry {
+            sets.push(quote!(entry.per_entry = true;));
+        }
         if let Some(panel) = &botconf.panel {
             let panel = self.user(panel);
             sets.push(quote!(entry.panel_kind = ::core::option::Option::Some(#panel);));

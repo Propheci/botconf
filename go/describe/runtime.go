@@ -1,6 +1,10 @@
 package describe
 
-import "github.com/propheci/botconf/go/settingspb"
+import (
+	"strings"
+
+	"github.com/propheci/botconf/go/settingspb"
+)
 
 // RuntimeSettings are the descriptors of the entries marked runtime, with
 // their absolute dotted keys, below tables (not lists or maps). A host
@@ -23,13 +27,20 @@ func collectRuntime(table *Table, prefix string, settings *[]*settingspb.Setting
 			*settings = append(*settings, &settingspb.SettingDescriptor{
 				Key:         key,
 				Title:       entry.Title,
-				Description: entry.Description,
+				Description: summary(entry.Description),
 				Kind:        panelKind(entry.Node, entry.Nullable),
 			})
 		case entry.Node.Table != nil:
 			collectRuntime(entry.Node.Table, key, settings)
 		}
 	}
+}
+
+// summary is a description's first paragraph: a panel shows the summary,
+// the file and a setup screen the whole.
+func summary(description string) string {
+	first, _, _ := strings.Cut(description, "\n\n")
+	return first
 }
 
 // panelKind is the settings panel's editor for a node.

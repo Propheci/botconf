@@ -367,3 +367,26 @@ fn only_an_option_makes_a_runtime_setting_clearable() {
     ));
     assert_eq!(settings[1].kind, Kind::Text { optional: true });
 }
+
+#[test]
+fn per_entry_maps_and_summaries() {
+    #[derive(Describe, Deserialize)]
+    #[allow(dead_code)]
+    struct Runtime {
+        /// Routing rules by id.
+        ///
+        /// A rule's id is how its conversations remember it.
+        #[serde(default)]
+        #[botconf(per_entry, panel = Kind::Json)]
+        rules: BTreeMap<String, String>,
+    }
+    let description = Description::of::<Runtime>("R", "");
+    let settings = description.runtime_settings();
+    assert!(settings[0].per_entry);
+    assert_eq!(settings[0].description.as_ref(), "Routing rules by id.");
+    assert!(
+        description
+            .example()
+            .contains("# A rule's id is how its conversations remember it.")
+    );
+}
