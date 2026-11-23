@@ -12,9 +12,13 @@ repository.workspace = true
 sea-orm = ["dep:sea-orm", "dep:chrono"]
 ## A clap subcommand to view and change the settings from a terminal.
 cli = ["dep:clap"]
+## `#[derive(Describe)]`: a config type's description from its doc comments
+## and serde attributes.
+derive = ["dep:botconf-derive"]
 
 [dependencies]
 arc-swap = { workspace = true }
+botconf-derive = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
 figment = { workspace = true }
@@ -30,3 +34,7 @@ tracing = { workspace = true }
 figment = { workspace = true, features = ["test", "toml"] }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "test-util"] }
+
+[[test]]
+name = "derive"
+required-features = ["derive"]

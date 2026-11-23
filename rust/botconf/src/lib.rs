@@ -88,6 +88,9 @@ pub use self::{
     storage::{MemoryStorage, Storage, StorageError, StoredOverride},
     store::{BuildError, SettingsError, SettingsStore, parse_value},
 };
+/// `#[derive(Describe)]`: see [`describe`] for its attributes.
+#[cfg(feature = "derive")]
+pub use botconf_derive::Describe;
 
 /// Describes a program's configuration to the [`SettingsStore`].
 pub trait Schema: Send + Sync + Sized + 'static {

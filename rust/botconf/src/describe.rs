@@ -7,6 +7,38 @@
 //! ([`Description::render`], used by `botconf-tui`).
 //!
 //! Values are JSON, as everywhere in botconf; the file is TOML.
+//!
+//! # The derive
+//!
+//! `#[derive(Describe)]` (the `derive` feature) reads what serde reads:
+//! field names with `rename` and `rename_all`; `default` and `default =
+//! "fn"` on a field, or `default` on the type (its `Default` gives each
+//! field's), as the option's default when its type is `Serialize`; `skip` and
+//! `skip_deserializing`; `flatten`; enums of unit variants as one-of values,
+//! internally tagged enums (`tag = "…"`) as tagged tables. A field without a
+//! default whose type is not an `Option` is required. The doc comments are
+//! the descriptions (a field without one takes its type's), and a key's title
+//! is the key in words unless set. `#[botconf(…)]` says the rest:
+//!
+//! | Attribute | On | Meaning |
+//! |---|---|---|
+//! | `title = "…"` | field, variant | The title, instead of the key in words |
+//! | `runtime` | field | Can change at runtime: one of [`Description::runtime_settings`] |
+//! | `panel = <Kind>` | field | The runtime setting's panel editor, instead of the value kind's |
+//! | `secret` | field, type | A secret value: masked on screens |
+//! | `env`, `env = token \| secret \| plain` | field | Names an environment variable holding the value (a token can be generated) |
+//! | `kind = <ValueKind>` | field, type | The value kind, instead of the type's |
+//! | `min = <i64>`, `max = <i64>` | field | An integer's bounds, instead of the type's |
+//! | `example = <JSON>` | field | What the generated example sets |
+//! | `hint = <JSON>` | field | Shown commented out when absent and there is no default |
+//! | `skip` | field, variant | Not described |
+//! | `crate = "path"` | type | Where botconf is, when not `::botconf` |
+//!
+//! `kind`, `panel`, `min` and `max` are Rust expressions, with botconf's
+//! names (`ValueKind`, `Kind`, …) in scope; `example` and `hint` are JSON,
+//! as `serde_json::json!` writes it. A field read through `with` or
+//! `deserialize_with` needs `kind` (or `skip`); an untagged or adjacently
+//! tagged enum, or a generic type, needs a hand-written impl.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
@@ -123,6 +155,11 @@ pub enum EnvValue {
 /// with `#[derive(botconf::Describe)]` (the `derive` feature).
 pub trait Describe {
     fn node() -> Node;
+
+    /// The type's own description, for a field that has none.
+    fn doc() -> String {
+        String::new()
+    }
 }
 
 impl Entry {
@@ -356,7 +393,11 @@ fn entry_comment(out: &mut String, entry: &Entry) {
     }
     if entry.required {
         out.push_str("# Required.\n");
-    } else if let Some(default) = entry.default.as_ref().filter(|value| !value.is_null()) {
+    } else if let Some(default) = entry
+        .default
+        .as_ref()
+        .filter(|value| entry.is_value() && !value.is_null())
+    {
         let _ = writeln!(out, "# Default: {}.", toml_value(default));
     }
 }
@@ -619,6 +660,10 @@ impl<T: Describe> Describe for Option<T> {
     fn node() -> Node {
         T::node()
     }
+
+    fn doc() -> String {
+        T::doc()
+    }
 }
 
 impl<T: Describe> Describe for Vec<T> {
@@ -628,11 +673,19 @@ impl<T: Describe> Describe for Vec<T> {
             node => Node::List(Box::new(node)),
         }
     }
+
+    fn doc() -> String {
+        T::doc()
+    }
 }
 
 impl<T: Describe> Describe for BTreeMap<String, T> {
     fn node() -> Node {
         Node::Map(Box::new(T::node()))
+    }
+
+    fn doc() -> String {
+        T::doc()
     }
 }
 
@@ -640,7 +693,13 @@ impl<T: Describe, S> Describe for HashMap<String, T, S> {
     fn node() -> Node {
         Node::Map(Box::new(T::node()))
     }
+
+    fn doc() -> String {
+        T::doc()
+    }
 }
 
+#[doc(hidden)]
+pub mod __private;
 #[cfg(test)]
 mod tests;

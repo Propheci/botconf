@@ -447,6 +447,7 @@ name = "botconf"
 version = "0.12.0"
 dependencies = [
  "arc-swap",
+ "botconf-derive",
  "chrono",
  "clap",
  "figment",
@@ -457,6 +458,15 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "botconf-derive"
+version = "0.12.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
