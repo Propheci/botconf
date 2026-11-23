@@ -66,7 +66,7 @@ fn fake_token() -> Result<String, String> {
     Ok("generated".into())
 }
 
-fn app(values: Value, env: &str) -> App {
+fn app(values: Value, env: &str) -> App<'static> {
     App::new(
         Description::of::<Config>("Sample", ""),
         values,
@@ -91,13 +91,13 @@ fn select(app: &mut App, title: &str) {
     let index = app
         .rows()
         .iter()
-        .position(|row| App::title_of(row) == title)
+        .position(|row| app.title_of(row) == title)
         .unwrap_or_else(|| panic!("no row {title}"));
     app.screens.last_mut().unwrap().cursor = index;
 }
 
 fn titles(app: &App) -> Vec<String> {
-    app.rows().iter().map(App::title_of).collect()
+    app.rows().iter().map(|row| app.title_of(row)).collect()
 }
 
 #[test]
@@ -340,4 +340,246 @@ fn every_mode_draws_at_any_size() {
             }
         }
     }
+}
+
+#[derive(Describe, Deserialize)]
+#[allow(dead_code)]
+struct Chats {
+    /// The home chat.
+    #[botconf(domain = "t.chat")]
+    home: Option<String>,
+    /// Where notices go.
+    #[serde(default)]
+    #[botconf(domain = "t.chat")]
+    notify: Vec<String>,
+}
+
+const KNOWN: [(&str, &str); 3] = [
+    ("chat:1", "Family"),
+    ("chat:2", "Work"),
+    ("chat:3", "Football"),
+];
+
+fn chats_app(values: Value) -> App<'static> {
+    App::new(
+        Description::of::<Chats>("Chats", ""),
+        values,
+        EnvFile::default(),
+        ".env".into(),
+        fake_token,
+    )
+    .with_suggestions(Box::new(|query: &Query| {
+        let text = query.text.to_lowercase();
+        Ok(KNOWN
+            .iter()
+            .filter(|(id, title)| id.contains(&text) || title.to_lowercase().contains(&text))
+            .take(query.limit)
+            .map(|(id, title)| Suggestion {
+                value: (*id).into(),
+                label: format!("{title} ({id})"),
+            })
+            .collect())
+    }))
+}
+
+fn editing(app: &App) -> Edit {
+    match &app.mode {
+        Mode::Edit(edit) => edit.clone(),
+        other => panic!("not editing: {other:?}"),
+    }
+}
+
+#[test]
+fn a_domain_value_is_picked_by_search() {
+    let mut app = chats_app(json!({}));
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(
+        editing(&app).suggestions.len(),
+        3,
+        "everything, before typing"
+    );
+    typing(&mut app, "fo");
+    let edit = editing(&app);
+    assert_eq!(edit.suggestions.len(), 1);
+    assert_eq!(edit.suggestions[0].label, "Football (chat:3)");
+    key(&mut app, KeyCode::Down);
+    assert_eq!(editing(&app).highlight, Some(0));
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.values, json!({"home": "chat:3"}));
+    // Without a highlight, Enter takes what is typed.
+    key(&mut app, KeyCode::Enter);
+    app.key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    typing(&mut app, "chat:9");
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.values, json!({"home": "chat:9"}));
+}
+
+#[test]
+fn the_host_says_why_nothing_is_suggested() {
+    let mut app = App::new(
+        Description::of::<Chats>("Chats", ""),
+        json!({}),
+        EnvFile::default(),
+        ".env".into(),
+        fake_token,
+    )
+    .with_suggestions(Box::new(|_: &Query| Err("no chats known yet".into())));
+    key(&mut app, KeyCode::Enter);
+    let edit = editing(&app);
+    assert!(edit.suggestions.is_empty());
+    assert_eq!(edit.unsuggested.as_deref(), Some("no chats known yet"));
+}
+
+#[test]
+fn a_domain_list_adds_and_edits_its_items_by_search() {
+    let mut app = chats_app(json!({"notify": ["chat:2"]}));
+    select(&mut app, "Notify");
+    key(&mut app, KeyCode::Enter);
+    assert!(app.is_collection());
+    assert_eq!(
+        titles(&app),
+        ["Work (chat:2)"],
+        "items read by their labels"
+    );
+    key(&mut app, KeyCode::Char('a'));
+    typing(&mut app, "fam");
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.values["notify"], json!(["chat:2", "chat:1"]));
+    assert_eq!(titles(&app), ["Work (chat:2)", "Family (chat:1)"]);
+    // An item is edited by the same search.
+    key(&mut app, KeyCode::Home);
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(editing(&app).input.text, "chat:2");
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Char('d'));
+    key(&mut app, KeyCode::Char('y'));
+    assert_eq!(app.values["notify"], json!(["chat:1"]));
+}
+
+fn with_action(mut app: App<'static>) -> App<'static> {
+    app.actions = vec![ActionInfo {
+        title: "Link account".into(),
+        description: "Log in.".into(),
+    }];
+    app
+}
+
+#[test]
+fn an_action_runs_from_the_root_screen() {
+    let mut app = with_action(chats_app(json!({})));
+    key(&mut app, KeyCode::End);
+    assert_eq!(app.title_of(&app.rows()[2]), "▶ Link account");
+    assert_eq!(key(&mut app, KeyCode::Enter), Effect::RunAction(0));
+    app.started(0);
+    app.action_event(ActionEvent::Say("Scan this:".into()));
+    app.action_event(ActionEvent::Qr("link".into()));
+    app.action_event(ActionEvent::Ask {
+        question: "Code:".into(),
+        secret: false,
+    });
+    typing(&mut app, "123");
+    assert_eq!(
+        key(&mut app, KeyCode::Enter),
+        Effect::Answer(Some("123".into()))
+    );
+    app.action_event(ActionEvent::Ask {
+        question: "Password:".into(),
+        secret: true,
+    });
+    typing(&mut app, "pw");
+    assert_eq!(
+        key(&mut app, KeyCode::Enter),
+        Effect::Answer(Some("pw".into()))
+    );
+    let Mode::Running(running) = &app.mode else {
+        panic!("running");
+    };
+    assert_eq!(
+        running.lines,
+        ["Scan this:", "Code: 123", "Password: ••••••"]
+    );
+    assert_eq!(running.qr.as_deref(), Some("link"));
+    app.action_event(ActionEvent::Done(Ok("Linked.".into())));
+    assert_eq!(key(&mut app, KeyCode::Char('x')), Effect::None);
+    assert!(matches!(app.mode, Mode::Browse));
+    assert_eq!(app.status.as_deref(), Some("Linked."));
+}
+
+#[test]
+fn an_action_is_stopped_with_esc_and_its_failure_shown() {
+    let mut app = with_action(chats_app(json!({})));
+    app.started(0);
+    app.action_event(ActionEvent::Ask {
+        question: "Code:".into(),
+        secret: false,
+    });
+    assert_eq!(key(&mut app, KeyCode::Esc), Effect::Cancel);
+    // Ctrl-c stops it too, rather than quitting.
+    assert_eq!(
+        app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+        Effect::Cancel
+    );
+    app.action_event(ActionEvent::Done(Err("Stopped.".into())));
+    key(&mut app, KeyCode::Char('x'));
+    assert!(matches!(&app.mode, Mode::Message(text) if text == "Stopped."));
+}
+
+#[test]
+fn a_running_action_draws_with_its_qr_code() {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    let mut app = with_action(chats_app(json!({})));
+    app.started(0);
+    app.action_event(ActionEvent::Qr(
+        "2@abcdefghijklmnopqrstuvwxyz,0123456789,ABCDEF".into(),
+    ));
+    app.action_event(ActionEvent::Ask {
+        question: "Code:".into(),
+        secret: true,
+    });
+    for (width, height) in [(120, 40), (40, 10), (1, 1)] {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| crate::view::draw(frame, &app))
+            .unwrap();
+    }
+    let lines = crate::view::qr_lines("2@abcdefghijklmnopqrstuvwxyz,0123456789,ABCDEF").unwrap();
+    // Two modules a character down, one across.
+    assert!(
+        lines.len() < lines[0].chars().count(),
+        "{} lines",
+        lines.len()
+    );
+    assert!(
+        lines
+            .iter()
+            .all(|line| line.chars().count() == lines[0].chars().count())
+    );
+}
+
+#[test]
+fn a_qr_code_that_does_not_fit_says_what_it_needs() {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    let mut app = with_action(chats_app(json!({})));
+    app.started(0);
+    app.action_event(ActionEvent::Qr(
+        "2@abcdefghijklmnopqrstuvwxyz,0123456789,ABCDEF".into(),
+    ));
+    let mut terminal = Terminal::new(TestBackend::new(80, 16)).unwrap();
+    terminal
+        .draw(|frame| crate::view::draw(frame, &app))
+        .unwrap();
+    let screen: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(
+        screen.contains("The QR code needs a terminal of at least"),
+        "{screen}"
+    );
 }

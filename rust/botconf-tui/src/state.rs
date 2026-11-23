@@ -1,6 +1,9 @@
 //! The setup screens' state: the values being edited, the screens open and
 //! what a key does. Pure (no terminal, no files), so it is tested by keys.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use botconf::describe::{self, Description, Entry, EnvValue, Node, Table, ValueKind, Variant};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::{Map, Value};
@@ -20,6 +23,9 @@ pub struct Screen {
     pub path: Vec<Seg>,
     pub title: String,
     pub cursor: usize,
+    /// A list of values from a domain (chats): its items are picked by
+    /// search.
+    pub domain: Option<String>,
 }
 
 /// One line of a screen.
@@ -29,8 +35,10 @@ pub enum Row {
     Entry(Box<Entry>),
     /// A tagged table's tag: picks which variant's options it has.
     Tag { tag: String, variants: Vec<Variant> },
-    /// One table of a list or a map.
+    /// One item of a list or a map.
     Item { seg: Seg, label: String },
+    /// One of the host's actions (on the root screen).
+    Action(usize),
 }
 
 #[derive(Clone, Debug)]
@@ -42,6 +50,8 @@ pub enum Mode {
     /// Closed by any key.
     Message(String),
     Help,
+    /// An action running, or done (closed by any key).
+    Running(Running),
 }
 
 #[derive(Clone, Debug)]
@@ -53,17 +63,96 @@ pub struct Edit {
     pub secret: bool,
     /// Shown under the input: what an empty input means, or the last error.
     pub note: String,
+    /// Where the value comes from: the input searches it.
+    pub domain: Option<String>,
+    /// The matches of the input, when there is a domain.
+    pub suggestions: Vec<Suggestion>,
+    /// The suggestion Enter picks.
+    pub highlight: Option<usize>,
+    /// Why there are no suggestions, when the host says.
+    pub unsuggested: Option<String>,
 }
 
 #[derive(Clone, Debug)]
 pub enum Target {
     /// A value at a path; an empty input removes it.
     Value { path: Vec<Seg>, kind: ValueKind },
+    /// A new item at the end of the list of values at a path.
+    Append { path: Vec<Seg> },
     /// An environment variable's value in the env file.
     Env { var: String },
     /// The name of a new map entry.
     NewName { path: Vec<Seg> },
 }
+
+/// A value the host offers for a domain, and how it reads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Suggestion {
+    pub value: String,
+    pub label: String,
+}
+
+/// What a host's suggestions are asked for.
+pub struct Query<'q> {
+    pub domain: &'q str,
+    /// What is typed so far.
+    pub text: &'q str,
+    /// The values being edited (the host may narrow by them, e.g. to the
+    /// connectors the file lists).
+    pub values: &'q Value,
+    pub limit: usize,
+}
+
+/// The host's suggestions: the matches, or why there are none.
+pub type SuggestFn<'a> = Box<dyn Fn(&Query) -> Result<Vec<Suggestion>, String> + 'a>;
+
+/// How many suggestions an input shows.
+const SUGGESTIONS: usize = 8;
+
+/// An action as the screen lists it.
+#[derive(Clone, Debug)]
+pub struct ActionInfo {
+    pub title: String,
+    pub description: String,
+}
+
+/// A running (or finished) action's screen.
+#[derive(Clone, Debug, Default)]
+pub struct Running {
+    pub title: String,
+    /// What the action said, oldest first.
+    pub lines: Vec<String>,
+    /// Its latest progress.
+    pub progress: Option<String>,
+    /// A QR code to scan.
+    pub qr: Option<String>,
+    /// Its open question.
+    pub question: Option<Question>,
+    /// Asked to stop, not stopped yet.
+    pub cancelling: bool,
+    /// Its outcome, once done.
+    pub done: Option<Result<String, String>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Question {
+    pub prompt: String,
+    pub secret: bool,
+    pub input: Input,
+}
+
+/// What a running action tells the screen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ActionEvent {
+    Say(String),
+    Qr(String),
+    Progress(String),
+    Ask { question: String, secret: bool },
+    Done(Result<String, String>),
+}
+
+/// The most lines a running action's screen keeps.
+const ACTION_LINES: usize = 200;
 
 #[derive(Clone, Debug)]
 pub struct Choose {
@@ -87,12 +176,19 @@ pub enum Confirm {
 }
 
 /// What the caller does after a key.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
     None,
     /// Check the candidate files and write them; then call [`App::saved`].
     Save,
     Quit,
+    /// Save when there are changes, then start the host's action (and call
+    /// [`App::started`]).
+    RunAction(usize),
+    /// Answer the running action's question (`None`: it was cancelled).
+    Answer(Option<String>),
+    /// Ask the running action to stop.
+    Cancel,
 }
 
 /// How a row's value reads.
@@ -161,7 +257,49 @@ impl Input {
     }
 }
 
-pub struct App {
+impl Edit {
+    pub fn new(title: String, target: Target, text: String, note: String) -> Self {
+        Self {
+            title,
+            target,
+            input: Input::new(text),
+            secret: false,
+            note,
+            domain: None,
+            suggestions: Vec::new(),
+            highlight: None,
+            unsuggested: None,
+        }
+    }
+}
+
+/// A key while an action runs: its question's input, or stopping it.
+fn running_key(running: &mut Running, key: KeyEvent) -> Effect {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    if key.code == KeyCode::Esc || (ctrl && key.code == KeyCode::Char('c')) {
+        running.question = None;
+        running.cancelling = true;
+        return Effect::Cancel;
+    }
+    let Some(question) = &mut running.question else {
+        return Effect::None;
+    };
+    if key.code == KeyCode::Enter {
+        let answer = question.input.text.clone();
+        let line = if question.secret {
+            format!("{} ••••••", question.prompt)
+        } else {
+            format!("{} {answer}", question.prompt)
+        };
+        running.lines.push(line);
+        running.question = None;
+        return Effect::Answer(Some(answer));
+    }
+    question.input.key(key);
+    Effect::None
+}
+
+pub struct App<'a> {
     pub description: Description,
     /// The config file's values (an object).
     pub values: Value,
@@ -173,10 +311,16 @@ pub struct App {
     pub dirty: bool,
     /// A one-line notice, until the next key.
     pub status: Option<String>,
+    /// The host's actions, listed on the root screen.
+    pub actions: Vec<ActionInfo>,
     token: fn() -> Result<String, String>,
+    suggest: Option<SuggestFn<'a>>,
+    /// Labels of domain values already seen in suggestions, by domain and
+    /// value.
+    labels: RefCell<HashMap<(String, String), String>>,
 }
 
-impl App {
+impl<'a> App<'a> {
     pub fn new(
         description: Description,
         values: Value,
@@ -192,6 +336,7 @@ impl App {
             path: Vec::new(),
             title: description.title.clone(),
             cursor: 0,
+            domain: None,
         };
         Self {
             description,
@@ -202,8 +347,60 @@ impl App {
             mode: Mode::Browse,
             dirty: false,
             status: None,
+            actions: Vec::new(),
             token,
+            suggest: None,
+            labels: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// Values of a domain are suggested by `suggest`.
+    pub fn with_suggestions(mut self, suggest: SuggestFn<'a>) -> Self {
+        self.suggest = Some(suggest);
+        self
+    }
+
+    /// The host started action `index`: its screen opens.
+    pub fn started(&mut self, index: usize) {
+        self.mode = Mode::Running(Running {
+            title: self.actions[index].title.clone(),
+            ..Running::default()
+        });
+    }
+
+    /// What the running action told the screen.
+    pub fn action_event(&mut self, event: ActionEvent) {
+        let Mode::Running(running) = &mut self.mode else {
+            return;
+        };
+        match event {
+            ActionEvent::Say(text) => {
+                running.lines.push(text);
+                let excess = running.lines.len().saturating_sub(ACTION_LINES);
+                running.lines.drain(..excess);
+            }
+            ActionEvent::Qr(data) => running.qr = Some(data),
+            ActionEvent::Progress(text) => running.progress = Some(text),
+            ActionEvent::Ask { question, secret } => {
+                running.question = Some(Question {
+                    prompt: question,
+                    secret,
+                    input: Input::default(),
+                });
+            }
+            ActionEvent::Done(outcome) => {
+                running.question = None;
+                running.qr = None;
+                running.progress = None;
+                running.cancelling = false;
+                running.done = Some(outcome);
+            }
+        }
+    }
+
+    /// An action could not start (its save was refused).
+    pub fn not_started(&mut self, error: String) {
+        self.mode = Mode::Message(format!("Not run: {error}"));
     }
 
     pub fn screen(&self) -> &Screen {
@@ -250,6 +447,8 @@ impl App {
                     find(tagged_table(&tag, &common, &variants, value), key)?
                 }
                 (Node::List(inner), Seg::Index(_)) | (Node::Map(inner), Seg::Key(_)) => *inner,
+                // A list of values from a domain opens as a screen of items.
+                (Node::Value(ValueKind::TextList), Seg::Index(_)) => Node::Value(ValueKind::Text),
                 _ => return None,
             };
         }
@@ -259,11 +458,36 @@ impl App {
     pub fn rows(&self) -> Vec<Row> {
         let path = &self.screen().path;
         match self.node_at(path) {
-            Some(Node::Table(table)) => table
-                .entries
-                .into_iter()
-                .map(|entry| Row::Entry(Box::new(entry)))
-                .collect(),
+            Some(Node::Table(table)) => {
+                let mut rows: Vec<Row> = table
+                    .entries
+                    .into_iter()
+                    .map(|entry| Row::Entry(Box::new(entry)))
+                    .collect();
+                if path.is_empty() {
+                    rows.extend((0..self.actions.len()).map(Row::Action));
+                }
+                rows
+            }
+            Some(Node::Value(ValueKind::TextList)) => {
+                let domain = self.screen().domain.clone().unwrap_or_default();
+                match get(&self.values, path) {
+                    Some(Value::Array(items)) => items
+                        .iter()
+                        .enumerate()
+                        .map(|(index, item)| {
+                            let value = item
+                                .as_str()
+                                .map_or_else(|| item.to_string(), str::to_owned);
+                            Row::Item {
+                                seg: Seg::Index(index),
+                                label: self.label_for(&domain, &value),
+                            }
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                }
+            }
             Some(Node::Tagged {
                 tag,
                 common,
@@ -308,8 +532,44 @@ impl App {
     pub fn is_collection(&self) -> bool {
         matches!(
             self.node_at(&self.screen().path),
-            Some(Node::List(_) | Node::Map(_))
+            Some(Node::List(_) | Node::Map(_) | Node::Value(ValueKind::TextList))
         )
+    }
+
+    /// How a domain's value reads: the host's label for it, else the value.
+    pub fn label_for(&self, domain: &str, value: &str) -> String {
+        let key = (domain.to_owned(), value.to_owned());
+        if let Some(label) = self.labels.borrow().get(&key) {
+            return label.clone();
+        }
+        let label = self
+            .suggestions(domain, value)
+            .ok()
+            .and_then(|found| found.into_iter().find(|s| s.value == value))
+            .map_or_else(|| value.to_owned(), |found| found.label);
+        self.labels.borrow_mut().insert(key, label.clone());
+        label
+    }
+
+    /// The host's matches for `text` in `domain`, remembering their labels.
+    fn suggestions(&self, domain: &str, text: &str) -> Result<Vec<Suggestion>, String> {
+        let Some(suggest) = &self.suggest else {
+            return Ok(Vec::new());
+        };
+        let found = suggest(&Query {
+            domain,
+            text,
+            values: &self.values,
+            limit: SUGGESTIONS,
+        })?;
+        let mut labels = self.labels.borrow_mut();
+        for suggestion in &found {
+            labels.insert(
+                (domain.to_owned(), suggestion.value.clone()),
+                suggestion.label.clone(),
+            );
+        }
+        Ok(found)
     }
 
     fn child(&self, seg: Seg) -> Vec<Seg> {
@@ -318,17 +578,19 @@ impl App {
         path
     }
 
-    pub fn title_of(row: &Row) -> String {
+    pub fn title_of(&self, row: &Row) -> String {
         match row {
             Row::Entry(entry) => entry.title.clone(),
             Row::Tag { tag, .. } => describe::title_of(tag),
             Row::Item { label, .. } => label.clone(),
+            Row::Action(index) => format!("▶ {}", self.actions[*index].title),
         }
     }
 
     pub fn shown(&self, row: &Row) -> Shown {
         match row {
             Row::Item { .. } => Shown::Opens(String::new()),
+            Row::Action(_) => Shown::Opens("run".into()),
             Row::Tag { tag, variants } => {
                 let path = self.child(Seg::Key(tag.clone()));
                 match get(&self.values, &path).and_then(Value::as_str) {
@@ -404,8 +666,14 @@ impl App {
                     Node::Value(ValueKind::Int { min, max }) => {
                         facts.push(format!("A whole number from {min} to {max}"));
                     }
+                    Node::Value(ValueKind::TextList) if entry.domain.is_some() => {
+                        facts.push("A list: enter opens it, a adds an item by search".into());
+                    }
                     Node::Value(ValueKind::TextList) => {
                         facts.push("A list: values separated by commas".into());
+                    }
+                    Node::Value(_) if entry.domain.is_some() => {
+                        facts.push("Type to search; enter picks the highlighted match".into());
                     }
                     Node::Value(ValueKind::Json) => facts.push("Written as JSON".into()),
                     Node::Value(ValueKind::EnvVar(what)) => {
@@ -444,11 +712,17 @@ impl App {
                     }
                     lines.push(line);
                 }
-                (Self::title_of(row), lines)
+                (self.title_of(row), lines)
             }
             Row::Item { .. } => {
                 lines.push("Enter: open · d: delete".into());
-                (Self::title_of(row), lines)
+                (self.title_of(row), lines)
+            }
+            Row::Action(index) => {
+                let action = &self.actions[*index];
+                lines.push(action.description.clone());
+                lines.push("Enter: run (changes are saved first) · esc while it runs: stop".into());
+                (action.title.clone(), lines)
             }
         }
     }
@@ -485,13 +759,27 @@ impl App {
 
     pub fn key(&mut self, key: KeyEvent) -> Effect {
         self.status = None;
+        // While an action runs, keys go to it (ctrl-c stops it, not the
+        // screen).
+        if let Mode::Running(running) = &mut self.mode {
+            if running.done.is_none() {
+                return running_key(running, key);
+            }
+            let done = running.done.take().expect("checked");
+            self.mode = Mode::Browse;
+            match done {
+                Ok(notice) => self.status = Some(notice),
+                Err(error) => self.mode = Mode::Message(error),
+            }
+            return Effect::None;
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if ctrl && key.code == KeyCode::Char('c') {
             return Effect::Quit;
         }
         match std::mem::replace(&mut self.mode, Mode::Browse) {
             Mode::Browse => self.browse(key),
-            Mode::Message(_) | Mode::Help => Effect::None,
+            Mode::Message(_) | Mode::Help | Mode::Running(_) => Effect::None,
             Mode::Edit(edit) => {
                 self.edit(edit, key);
                 Effect::None
@@ -520,11 +808,11 @@ impl App {
             }
             KeyCode::Home => self.screen_mut().cursor = 0,
             KeyCode::End => self.screen_mut().cursor = count.saturating_sub(1),
-            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
-                if let Some(row) = row {
-                    self.activate(row);
-                }
-            }
+            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => match row {
+                Some(Row::Action(index)) => return Effect::RunAction(index),
+                Some(row) => self.activate(row),
+                None => {}
+            },
             KeyCode::Esc | KeyCode::Left | KeyCode::Backspace | KeyCode::Char('h') => {
                 if self.screens.len() > 1 {
                     self.screens.pop();
@@ -578,6 +866,25 @@ impl App {
 
     fn activate(&mut self, row: Row) {
         match row {
+            // An item of a list of domain values is edited by search.
+            Row::Item { seg, label } if self.screen().domain.is_some() => {
+                let domain = self.screen().domain.clone().unwrap_or_default();
+                let path = self.child(seg);
+                let current = get(&self.values, &path)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                let edit = Edit::new(
+                    label,
+                    Target::Value {
+                        path,
+                        kind: ValueKind::Text,
+                    },
+                    current,
+                    "Type to search; enter picks the highlighted match or what is typed.".into(),
+                );
+                self.mode = Mode::Edit(self.searching(edit, &domain));
+            }
             Row::Item { seg, label } => self.open(seg, label),
             Row::Tag { tag, variants } => {
                 let path = self.child(Seg::Key(tag.clone()));
@@ -640,17 +947,35 @@ impl App {
                             }
                             (None, _) => "Empty: unset.".to_owned(),
                         };
-                        self.mode = Mode::Edit(Edit {
-                            title: entry.title.clone(),
-                            secret: kind == ValueKind::Secret,
-                            target: Target::Value { path, kind },
-                            input: Input::new(text),
+                        if let (Some(domain), ValueKind::TextList) = (&entry.domain, &kind) {
+                            // Its items are picked by search, one by one.
+                            let domain = domain.clone();
+                            self.open(Seg::Key(entry.key.clone()), entry.title.clone());
+                            self.screen_mut().domain = Some(domain);
+                            return;
+                        }
+                        let edit = Edit::new(
+                            entry.title.clone(),
+                            Target::Value {
+                                path,
+                                kind: kind.clone(),
+                            },
+                            text,
                             note,
+                        );
+                        let edit = Edit {
+                            secret: kind == ValueKind::Secret,
+                            ..edit
+                        };
+                        self.mode = Mode::Edit(match &entry.domain {
+                            Some(domain) => self.searching(edit, domain),
+                            None => edit,
                         });
                     }
                     _ => self.open(Seg::Key(entry.key.clone()), entry.title.clone()),
                 }
             }
+            Row::Action(_) => {}
         }
     }
 
@@ -660,7 +985,37 @@ impl App {
             path,
             title,
             cursor: 0,
+            domain: None,
         });
+    }
+
+    /// `edit`, searching `domain` as it is typed.
+    fn searching(&self, edit: Edit, domain: &str) -> Edit {
+        let mut edit = Edit {
+            domain: Some(domain.to_owned()),
+            ..edit
+        };
+        self.refresh_suggestions(&mut edit);
+        edit
+    }
+
+    fn refresh_suggestions(&self, edit: &mut Edit) {
+        let Some(domain) = &edit.domain else {
+            return;
+        };
+        match self.suggestions(domain, &edit.input.text) {
+            Ok(found) => {
+                edit.unsuggested = None;
+                edit.suggestions = found;
+            }
+            Err(why) => {
+                edit.unsuggested = Some(why);
+                edit.suggestions = Vec::new();
+            }
+        }
+        edit.highlight = edit
+            .highlight
+            .filter(|index| *index < edit.suggestions.len());
     }
 
     fn add(&mut self) {
@@ -682,13 +1037,22 @@ impl App {
                 self.open(Seg::Index(index), format!("{}.", index + 1));
             }
             Some(Node::Map(_)) => {
-                self.mode = Mode::Edit(Edit {
-                    title: "New entry's name".into(),
-                    target: Target::NewName { path },
-                    input: Input::default(),
-                    secret: false,
-                    note: "Its key in the file.".into(),
-                });
+                self.mode = Mode::Edit(Edit::new(
+                    "New entry's name".into(),
+                    Target::NewName { path },
+                    String::new(),
+                    "Its key in the file.".into(),
+                ));
+            }
+            Some(Node::Value(ValueKind::TextList)) => {
+                let domain = self.screen().domain.clone().unwrap_or_default();
+                let edit = Edit::new(
+                    format!("Add to {}", self.screen().title),
+                    Target::Append { path },
+                    String::new(),
+                    "Type to search; enter adds the highlighted match or what is typed.".into(),
+                );
+                self.mode = Mode::Edit(self.searching(edit, &domain));
             }
             _ => {}
         }
@@ -702,12 +1066,15 @@ impl App {
             self.status = Some("Name the variable first (enter).".into());
             return;
         };
+        let edit = Edit::new(
+            format!("{var} in {}", self.env_name),
+            Target::Env { var },
+            value.unwrap_or_default(),
+            String::new(),
+        );
         self.mode = Mode::Edit(Edit {
-            title: format!("{var} in {}", self.env_name),
-            target: Target::Env { var },
-            input: Input::new(value.unwrap_or_default()),
             secret: what != EnvValue::Plain,
-            note: String::new(),
+            ..edit
         });
     }
 
@@ -746,16 +1113,32 @@ impl App {
     }
 
     fn edit(&mut self, mut edit: Edit, key: KeyEvent) {
+        let count = edit.suggestions.len();
         match key.code {
             KeyCode::Esc => {}
             KeyCode::Enter => {
+                // The highlighted match is what Enter takes.
+                if let Some(picked) = edit.highlight.and_then(|index| edit.suggestions.get(index)) {
+                    edit.input = Input::new(picked.value.clone());
+                }
                 if let Err(error) = self.commit(&edit) {
                     edit.note = error;
                     self.mode = Mode::Edit(edit);
                 }
             }
+            KeyCode::Down | KeyCode::Tab if count > 0 => {
+                edit.highlight = Some(edit.highlight.map_or(0, |index| (index + 1).min(count - 1)));
+                self.mode = Mode::Edit(edit);
+            }
+            KeyCode::Up | KeyCode::BackTab if count > 0 => {
+                edit.highlight = edit.highlight.and_then(|index| index.checked_sub(1));
+                self.mode = Mode::Edit(edit);
+            }
             _ => {
-                edit.input.key(key);
+                if edit.input.key(key) {
+                    edit.highlight = None;
+                    self.refresh_suggestions(&mut edit);
+                }
                 self.mode = Mode::Edit(edit);
             }
         }
@@ -764,6 +1147,21 @@ impl App {
     fn commit(&mut self, edit: &Edit) -> Result<(), String> {
         let text = &edit.input.text;
         match &edit.target {
+            Target::Append { path } => {
+                let item = text.trim();
+                if item.is_empty() {
+                    return Err("Type or pick a value.".into());
+                }
+                let mut items = match get(&self.values, path) {
+                    Some(Value::Array(items)) => items.clone(),
+                    _ => Vec::new(),
+                };
+                items.push(Value::String(item.to_owned()));
+                let added = items.len() - 1;
+                set(&mut self.values, path, Value::Array(items));
+                self.screen_mut().cursor = added;
+                self.dirty = true;
+            }
             Target::Value { path, kind } => {
                 match parse(kind, text)? {
                     Some(value) => set(&mut self.values, path, value),
