@@ -50,7 +50,7 @@ func view(a *app, width, height int) string {
 	var body string
 	if a.mode == runningMode {
 		body = runningView(a, width, bodyHeight)
-	} else if popup := popupView(a, min(width-4, 64)); popup != "" {
+	} else if popup := popupView(a, min(width-4, 64), bodyHeight); popup != "" {
 		body = lipgloss.Place(width, bodyHeight, lipgloss.Center, lipgloss.Center, popup)
 	} else if width >= sideBySide {
 		half := width / 2
@@ -125,8 +125,11 @@ func detailsView(a *app, width, height int) string {
 	return box.Width(width).Height(height).Render(strings.Join(lines, "\n"))
 }
 
-// popupView is the open popup, or "".
-func popupView(a *app, width int) string {
+// shownSuggestions is the most matches an input's popup shows at once.
+const shownSuggestions = 10
+
+// popupView is the open popup, at most height lines, or "".
+func popupView(a *app, width, height int) string {
 	width = max(width, 10)
 	frame := func(title, text, bottom string) string {
 		content := bold.Render(title) + "\n" + text
@@ -160,8 +163,21 @@ func popupView(a *app, width int) string {
 				}
 				body += "\n" + warn.Render(why)
 			}
-			for index, suggestion := range a.edit.suggestions {
-				label := truncate(suggestion.Label, width-4)
+			// A window of the matches that follows the highlight, as many as
+			// fit (the border, the title, the input, the note and the keys
+			// take 6 lines).
+			count := len(a.edit.suggestions)
+			rows := min(count, shownSuggestions, max(height-6, 1))
+			first := max(0, a.edit.highlight-rows+1)
+			switch {
+			case count <= rows:
+			case a.edit.highlight >= 0:
+				bottom = fmt.Sprintf("↓↑ pgup pgdown · %d of %d · enter save · esc cancel", a.edit.highlight+1, count)
+			default:
+				bottom = fmt.Sprintf("↓↑ pgup pgdown · %d matches · enter save · esc cancel", count)
+			}
+			for index := first; index < count && index < first+rows; index++ {
+				label := truncate(a.edit.suggestions[index].Label, width-4)
 				if index == a.edit.highlight {
 					label = selected.Render(label)
 				} else {

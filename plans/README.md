@@ -721,3 +721,11 @@ each is marked in its plan):
   - Not checked: that the drawn QR code scans from a phone (the plan's STOP
     condition); the screen refuses to draw one that does not fit rather than
     wrapping it. The owner checks with wuphf 063's WhatsApp link.
+
+- **`v0.14.1`, `go/v0.14.1` (2026-11-23).** An input's matches scroll: the
+  screens ask the host for up to 200 (was 8, so ↓ stopped at the 8th) and
+  show a window of at most 10 that follows the highlight, fewer on a short
+  terminal (the popup was as tall as the list, clipped there), with "n of m"
+  in the popup's keys; PgUp and PgDn move by 8. Reported by the owner picking
+  a rule's chat in wuphf's setup. Tests in both languages; botconf-tui
+  clippy and tests, Go tui tests clean.

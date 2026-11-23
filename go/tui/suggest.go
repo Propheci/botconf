@@ -19,8 +19,12 @@ type Query struct {
 // SuggestFunc gives the host's matches for a query, or why there are none.
 type SuggestFunc func(Query) ([]Suggestion, error)
 
-// suggestions is how many matches an input shows.
-const suggestions = 8
+// suggestions is how many matches an input asks the host for; the popup
+// shows a window of them that follows the highlight.
+const suggestions = 200
+
+// suggestionPage is how far pgup and pgdown move the highlight.
+const suggestionPage = 8
 
 // suggest asks the host for matches, remembering their labels.
 func (a *app) suggest(domain, text string) ([]Suggestion, error) {

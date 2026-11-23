@@ -583,3 +583,72 @@ fn a_qr_code_that_does_not_fit_says_what_it_needs() {
         "{screen}"
     );
 }
+
+#[test]
+fn many_matches_scroll_with_the_highlight() {
+    use ratatui::{Terminal, backend::TestBackend};
+
+    let mut app = App::new(
+        Description::of::<Chats>("Chats", ""),
+        json!({}),
+        EnvFile::default(),
+        ".env".into(),
+        fake_token,
+    )
+    .with_suggestions(Box::new(|query: &Query| {
+        Ok((1..=30)
+            .take(query.limit)
+            .map(|n| Suggestion {
+                value: format!("chat:{n}"),
+                label: format!("Chat number {n:02}"),
+            })
+            .collect())
+    }));
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(
+        editing(&app).suggestions.len(),
+        30,
+        "more than a window's worth"
+    );
+    let screen = |app: &App, height: u16| {
+        let mut terminal = Terminal::new(TestBackend::new(100, height)).unwrap();
+        terminal
+            .draw(|frame| crate::view::draw(frame, app))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..height)
+            .map(|y| {
+                (0..100)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    for _ in 0..15 {
+        key(&mut app, KeyCode::Down);
+    }
+    assert_eq!(editing(&app).highlight, Some(14));
+    let drawn = screen(&app, 40);
+    assert!(
+        drawn.contains("Chat number 15"),
+        "the highlight is shown:\n{drawn}"
+    );
+    assert!(
+        !drawn.contains("Chat number 01"),
+        "the window moved:\n{drawn}"
+    );
+    assert!(drawn.contains("15 of 30"), "{drawn}");
+    // A short terminal shows fewer, the highlight still among them.
+    let short = screen(&app, 12);
+    assert!(short.contains("Chat number 15"), "{short}");
+    key(&mut app, KeyCode::PageDown);
+    assert_eq!(editing(&app).highlight, Some(22));
+    key(&mut app, KeyCode::PageDown);
+    key(&mut app, KeyCode::PageDown);
+    assert_eq!(editing(&app).highlight, Some(29), "the last");
+    key(&mut app, KeyCode::PageUp);
+    assert_eq!(editing(&app).highlight, Some(21));
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.values, json!({"home": "chat:22"}));
+}

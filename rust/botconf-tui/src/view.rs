@@ -11,6 +11,9 @@ use crate::state::{App, Confirm, Mode, Running, Shown};
 /// Wide enough for the details beside the list.
 const SIDE_BY_SIDE: u16 = 90;
 
+/// The most matches an input's popup shows at once.
+const SHOWN_SUGGESTIONS: usize = 10;
+
 pub fn draw(frame: &mut Frame, app: &App) {
     let [header, body, footer] = Layout::vertical([
         Constraint::Length(1),
@@ -114,12 +117,20 @@ fn draw_mode(frame: &mut Frame, app: &App) {
     match &app.mode {
         Mode::Browse => {}
         Mode::Edit(edit) => {
-            // The matches go under the note, one a line.
-            let listed = u16::try_from(edit.suggestions.len()).unwrap_or(u16::MAX);
-            let extra = match (edit.domain.is_some(), listed) {
+            // The matches go under the note, one a line: a window of them
+            // that follows the highlight, as many as fit (the border, the
+            // input and the note take 4 lines, and a line stays clear above
+            // and below).
+            let count = edit.suggestions.len();
+            let room = usize::from(area.height.saturating_sub(6)).max(1);
+            let rows = count.min(SHOWN_SUGGESTIONS).min(room);
+            let first = edit
+                .highlight
+                .map_or(0, |index| index.saturating_sub(rows.saturating_sub(1)));
+            let extra = match (edit.domain.is_some(), rows) {
                 (false, _) => 0,
                 (true, 0) => 1,
-                (true, listed) => listed,
+                (true, rows) => u16::try_from(rows).unwrap_or(u16::MAX),
             };
             let popup = centered(area, 72, 4u16.saturating_add(extra));
             frame.render_widget(Clear, popup);
@@ -141,7 +152,8 @@ fn draw_mode(frame: &mut Frame, app: &App) {
                     let why = edit.unsuggested.as_deref().unwrap_or("No matches.");
                     text.push(Line::styled(why, Style::default().fg(Color::Yellow)));
                 }
-                for (index, suggestion) in edit.suggestions.iter().enumerate() {
+                let window = edit.suggestions.iter().enumerate().skip(first).take(rows);
+                for (index, suggestion) in window {
                     let style = if edit.highlight == Some(index) {
                         Style::default().add_modifier(Modifier::REVERSED)
                     } else {
@@ -150,16 +162,23 @@ fn draw_mode(frame: &mut Frame, app: &App) {
                     text.push(Line::styled(suggestion.label.clone(), style));
                 }
             }
-            let bottom = if edit.domain.is_some() {
-                "↓↑ pick · enter save · esc cancel"
-            } else {
-                "enter save · esc cancel · ctrl-u clear"
+            let bottom = match (edit.domain.is_some(), edit.highlight) {
+                (false, _) => "enter save · esc cancel · ctrl-u clear".to_owned(),
+                (true, _) if count <= rows => "↓↑ pick · enter save · esc cancel".to_owned(),
+                // More matches than shown: where the highlight is in them.
+                (true, Some(index)) => {
+                    format!(
+                        "↓↑ pgup pgdn · {} of {count} · enter save · esc cancel",
+                        index + 1
+                    )
+                }
+                (true, None) => format!("↓↑ pgup pgdn · {count} matches · enter save · esc cancel"),
             };
             frame.render_widget(
                 Paragraph::new(text).block(
                     Block::bordered()
                         .title(edit.title.as_str())
-                        .title_bottom(bottom),
+                        .title_bottom(bottom.as_str()),
                 ),
                 popup,
             );

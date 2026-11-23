@@ -743,6 +743,20 @@ func (a *app) editKey(key string, runes []rune) {
 		a.edit.highlight = max(a.edit.highlight-1, -1)
 		a.mode = editing
 		return
+	case key == "pgdown" && count > 0:
+		next := suggestionPage - 1
+		if a.edit.highlight >= 0 {
+			next = a.edit.highlight + suggestionPage
+		}
+		a.edit.highlight = min(next, count-1)
+		a.mode = editing
+		return
+	case key == "pgup" && count > 0:
+		if a.edit.highlight >= 0 {
+			a.edit.highlight = max(a.edit.highlight-suggestionPage, 0)
+		}
+		a.mode = editing
+		return
 	}
 	before := string(a.edit.input.text)
 	if len(runes) > 0 && !strings.HasPrefix(key, "ctrl+") && !strings.HasPrefix(key, "alt+") {

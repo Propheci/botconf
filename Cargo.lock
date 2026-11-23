@@ -468,7 +468,7 @@ dependencies = [
 
 [[package]]
 name = "botconf"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "arc-swap",
  "botconf-derive",
@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "botconf-derive"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -495,7 +495,7 @@ dependencies = [
 
 [[package]]
 name = "botconf-grpc"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "botconf",
  "botconf-panel",
@@ -513,7 +513,7 @@ dependencies = [
 
 [[package]]
 name = "botconf-panel"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "botconf",
  "figment",
@@ -528,7 +528,7 @@ dependencies = [
 
 [[package]]
 name = "botconf-proto"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "prost",
  "tonic",
@@ -537,7 +537,7 @@ dependencies = [
 
 [[package]]
 name = "botconf-telegram"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "anyhow",
  "botconf",
@@ -554,7 +554,7 @@ dependencies = [
 
 [[package]]
 name = "botconf-tui"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "botconf",
  "crossterm",

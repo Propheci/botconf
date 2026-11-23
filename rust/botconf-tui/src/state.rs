@@ -106,8 +106,11 @@ pub struct Query<'q> {
 /// The host's suggestions: the matches, or why there are none.
 pub type SuggestFn<'a> = Box<dyn Fn(&Query) -> Result<Vec<Suggestion>, String> + 'a>;
 
-/// How many suggestions an input shows.
-const SUGGESTIONS: usize = 8;
+/// How many suggestions an input asks the host for; the popup shows a window
+/// of them that follows the highlight.
+const SUGGESTIONS: usize = 200;
+/// How far PgUp and PgDn move the highlight.
+const SUGGESTION_PAGE: usize = 8;
 
 /// An action as the screen lists it.
 #[derive(Clone, Debug)]
@@ -1132,6 +1135,19 @@ impl<'a> App<'a> {
             }
             KeyCode::Up | KeyCode::BackTab if count > 0 => {
                 edit.highlight = edit.highlight.and_then(|index| index.checked_sub(1));
+                self.mode = Mode::Edit(edit);
+            }
+            KeyCode::PageDown if count > 0 => {
+                let next = edit
+                    .highlight
+                    .map_or(SUGGESTION_PAGE - 1, |index| index + SUGGESTION_PAGE);
+                edit.highlight = Some(next.min(count - 1));
+                self.mode = Mode::Edit(edit);
+            }
+            KeyCode::PageUp if count > 0 => {
+                edit.highlight = edit
+                    .highlight
+                    .map(|index| index.saturating_sub(SUGGESTION_PAGE));
                 self.mode = Mode::Edit(edit);
             }
             _ => {

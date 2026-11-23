@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -221,5 +222,45 @@ func TestAQRCodeThatDoesNotFitSaysWhatItNeeds(t *testing.T) {
 	}
 	if out := view(a, 120, 40); strings.Contains(out, "The QR code needs") {
 		t.Fatalf("it fits:\n%s", out)
+	}
+}
+
+func TestManyMatchesScrollWithTheHighlight(t *testing.T) {
+	a := newChats(t, nil, func(query Query) ([]Suggestion, error) {
+		var out []Suggestion
+		for n := 1; n <= 30 && len(out) < query.Limit; n++ {
+			out = append(out, Suggestion{Value: fmt.Sprintf("chat:%d", n), Label: fmt.Sprintf("Chat number %02d", n)})
+		}
+		return out, nil
+	})
+	press(a, "enter")
+	if len(a.edit.suggestions) != 30 {
+		t.Fatalf("more than a window's worth: %d", len(a.edit.suggestions))
+	}
+	for range 15 {
+		press(a, "down")
+	}
+	if a.edit.highlight != 14 {
+		t.Fatalf("highlight %d", a.edit.highlight)
+	}
+	drawn := view(a, 100, 40)
+	if !strings.Contains(drawn, "Chat number 15") || strings.Contains(drawn, "Chat number 01") || !strings.Contains(drawn, "15 of 30") {
+		t.Fatalf("the window follows the highlight:\n%s", drawn)
+	}
+	// A short terminal shows fewer, the highlight still among them.
+	if short := view(a, 100, 12); !strings.Contains(short, "Chat number 15") {
+		t.Fatalf("short:\n%s", short)
+	}
+	press(a, "pgdown")
+	if a.edit.highlight != 22 {
+		t.Fatalf("pgdown: %d", a.edit.highlight)
+	}
+	press(a, "pgdown", "pgdown")
+	if a.edit.highlight != 29 {
+		t.Fatalf("the last: %d", a.edit.highlight)
+	}
+	press(a, "pgup", "enter")
+	if a.values["home"] != "chat:22" {
+		t.Fatalf("values %v", a.values)
 	}
 }
