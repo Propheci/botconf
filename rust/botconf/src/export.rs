@@ -342,6 +342,116 @@ pub async fn import(
     Ok(imported)
 }
 
+/// What an import into a running store did, or (a dry run) would do.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OnlineImport {
+    /// The runtime keys set (or that would be): the backup's value differed.
+    pub applied: Vec<String>,
+    /// Keys that differ but cannot change at runtime: an offline import
+    /// restores them.
+    pub offline: Vec<String>,
+    /// Keys whose value the store refused, with the reason (e.g. the section
+    /// it belongs to is not registered now).
+    pub rejected: Vec<(String, String)>,
+}
+
+/// Imports `backup` into a running store: every runtime setting whose value
+/// differs is set to the backup's, as a `Set` would (validated, recorded as
+/// changed `by`), and so is every override under a dynamic namespace; with
+/// `dry_run` they are only checked. What differs but cannot change at runtime
+/// is listed in `offline`; options the backup leaves out (its secrets, say)
+/// are left alone.
+pub async fn import_online<S: Schema>(
+    store: &crate::SettingsStore<S>,
+    backup: &Backup,
+    by: Option<String>,
+    dry_run: bool,
+) -> OnlineImport {
+    let namespaces = store.schema().dynamic_namespaces();
+    let below_namespace = |key: &str| namespaces.iter().any(|namespace| is_below(key, namespace));
+    let current = store.current();
+    let catalog = store.catalog();
+    let runtime: Vec<String> = catalog
+        .live()
+        .map(|(_, entry)| entry.key.clone())
+        .filter(|key| !below_namespace(key))
+        .collect();
+
+    let mut changes: Vec<(String, Value)> = Vec::new();
+    for key in &runtime {
+        if let Some(value) = at(&backup.config, key)
+            && current.value(key).as_ref() != Some(value)
+        {
+            changes.push((key.clone(), value.clone()));
+        }
+    }
+    for (key, value) in &backup.overrides {
+        if current.value(key).as_ref() != Some(value) {
+            changes.push((key.clone(), value.clone()));
+        }
+    }
+
+    let mut out = OnlineImport::default();
+    if let Ok(effective) = current.figment.extract::<Value>() {
+        differences(&backup.config, &effective, "", &runtime, &mut out.offline);
+    }
+    for (key, value) in changes {
+        let result = if dry_run {
+            store.check(&key, value).await
+        } else {
+            store.set(&key, value, by.clone()).await.map(drop)
+        };
+        match result {
+            Ok(()) => out.applied.push(key),
+            Err(error) => out.rejected.push((key, error.to_string())),
+        }
+    }
+    out
+}
+
+/// The value at the dotted `key`.
+fn at<'v>(value: &'v Value, key: &str) -> Option<&'v Value> {
+    key.split('.')
+        .try_fold(value, |value, part| value.get(part))
+}
+
+/// Collects the dotted keys where `backup` holds a value that differs from
+/// `effective`, below `prefix`, skipping the runtime keys (and what is below
+/// them). Tables are compared key by key, anything else whole.
+fn differences(
+    backup: &Value,
+    effective: &Value,
+    prefix: &str,
+    runtime: &[String],
+    out: &mut Vec<String>,
+) {
+    let covered = |key: &str| {
+        runtime
+            .iter()
+            .any(|runtime| key == runtime || is_below(key, runtime))
+    };
+    match (backup, effective) {
+        (Value::Object(backup), Value::Object(effective)) => {
+            for (name, value) in backup {
+                let key = if prefix.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{prefix}.{name}")
+                };
+                if covered(&key) {
+                    continue;
+                }
+                let effective = effective.get(name).unwrap_or(&Value::Null);
+                differences(value, effective, &key, runtime, out);
+            }
+        }
+        (backup, effective) if backup != effective && !prefix.is_empty() => {
+            out.push(prefix.to_owned());
+        }
+        _ => {}
+    }
+}
+
 /// Copies into `values` the secret options it lacks from `current`, in
 /// tables (not in lists or maps, whose items a backup may have reordered).
 fn keep_secrets(table: &Table, values: &mut Map<String, Value>, current: &Map<String, Value>) {

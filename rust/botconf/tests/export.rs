@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use botconf::describe::Description;
-use botconf::export::{Backup, ImportError, ImportTarget, export, import};
+use botconf::export::{Backup, ImportError, ImportTarget, export, import, import_online};
 use botconf::storage::{MemoryStorage, Storage, StoredOverride};
 use botconf::{Describe, RuntimeSetting, Schema, SettingsStore};
 use figment::{
@@ -288,4 +288,36 @@ fn a_config_file_is_not_a_backup() {
         Backup::parse("[backup]\nformat = 9\n"),
         Err(ImportError::Format { found: 9 })
     ));
+}
+
+#[tokio::test]
+async fn an_online_import_sets_what_changes_at_runtime_and_lists_the_rest() {
+    let mut backup = Backup::parse(&exported(false).await).unwrap();
+    backup.config["listen"] = json!("0.0.0.0:9");
+    let store = SettingsStore::load(Bot, Figment::from(Toml::string(FILE)), MemoryStorage::new())
+        .await
+        .unwrap();
+
+    let dry = import_online(&store, &backup, Some("me".into()), true).await;
+    assert_eq!(dry.applied, ["greeting"]);
+    assert_eq!(
+        store.current().config.greeting,
+        "hi",
+        "a dry run changes nothing"
+    );
+
+    let done = import_online(&store, &backup, Some("me".into()), false).await;
+    assert_eq!(done.applied, ["greeting"]);
+    assert_eq!(done.offline, ["listen"], "only the file holds it");
+    // Nothing registered the plugin's section: its override is refused.
+    assert_eq!(done.rejected.len(), 1);
+    assert_eq!(done.rejected[0].0, "plugins.echo.level");
+    assert_eq!(store.current().config.greeting, "hello");
+    // A second import finds nothing left to set; the password, absent from a
+    // backup without secrets, is not a difference.
+    let again = import_online(&store, &backup, None, false).await;
+    assert!(
+        again.applied.is_empty() && again.offline == ["listen"],
+        "{again:?}"
+    );
 }
