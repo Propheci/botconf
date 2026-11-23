@@ -652,3 +652,45 @@ fn many_matches_scroll_with_the_highlight() {
     key(&mut app, KeyCode::Enter);
     assert_eq!(app.values, json!({"home": "chat:22"}));
 }
+
+#[test]
+fn the_programs_own_variables_are_set_on_the_environment_screen() {
+    use botconf::describe::Variable;
+
+    let description = Description::of::<Chats>("Chats", "").with_env([
+        Variable::new("APP_ID", "From my.telegram.org.")
+            .title("App id")
+            .required(),
+        Variable::new("APP_HASH", "").secret(),
+    ]);
+    let mut app = App::new(
+        description,
+        json!({}),
+        EnvFile::parse("# mine\nAPP_HASH=abc\n"),
+        ".env".into(),
+        fake_token,
+    );
+    assert_eq!(titles(&app), ["Home", "Notify", "Environment"]);
+    assert_eq!(app.shown(&app.rows()[2]), Shown::Opens("1 of 2 set".into()));
+    select(&mut app, "Environment");
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(titles(&app), ["App id", "APP_HASH"]);
+    assert_eq!(app.shown(&app.rows()[0]), Shown::Missing);
+    assert_eq!(app.shown(&app.rows()[1]), Shown::Set("•••••• (set)".into()));
+    let (title, details) = app.details(&app.rows()[0]);
+    assert_eq!(title, "App id");
+    assert!(
+        details[1].contains("Variable: APP_ID, set in .env"),
+        "{details:?}"
+    );
+    key(&mut app, KeyCode::Enter);
+    typing(&mut app, "12345");
+    key(&mut app, KeyCode::Enter);
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Enter);
+    assert!(editing(&app).secret, "a secret variable is masked");
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.env.render(), "# mine\nAPP_HASH=abc\nAPP_ID=12345\n");
+    assert!(app.dirty);
+}

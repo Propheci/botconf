@@ -26,6 +26,8 @@ pub struct Screen {
     /// A list of values from a domain (chats): its items are picked by
     /// search.
     pub domain: Option<String>,
+    /// The Environment screen: the variables the program reads itself.
+    pub env: bool,
 }
 
 /// One line of a screen.
@@ -39,6 +41,10 @@ pub enum Row {
     Item { seg: Seg, label: String },
     /// One of the host's actions (on the root screen).
     Action(usize),
+    /// Opens the Environment screen (on the root screen).
+    Environment,
+    /// One of the variables the program reads itself, by its index.
+    Variable(usize),
 }
 
 #[derive(Clone, Debug)]
@@ -340,6 +346,7 @@ impl<'a> App<'a> {
             title: description.title.clone(),
             cursor: 0,
             domain: None,
+            env: false,
         };
         Self {
             description,
@@ -459,6 +466,9 @@ impl<'a> App<'a> {
     }
 
     pub fn rows(&self) -> Vec<Row> {
+        if self.screen().env {
+            return self.environment_rows();
+        }
         let path = &self.screen().path;
         match self.node_at(path) {
             Some(Node::Table(table)) => {
@@ -468,6 +478,9 @@ impl<'a> App<'a> {
                     .map(|entry| Row::Entry(Box::new(entry)))
                     .collect();
                 if path.is_empty() {
+                    if !self.description.env.is_empty() {
+                        rows.push(Row::Environment);
+                    }
                     rows.extend((0..self.actions.len()).map(Row::Action));
                 }
                 rows
@@ -587,11 +600,14 @@ impl<'a> App<'a> {
             Row::Tag { tag, .. } => describe::title_of(tag),
             Row::Item { label, .. } => label.clone(),
             Row::Action(index) => format!("▶ {}", self.actions[*index].title),
+            Row::Environment => "Environment".into(),
+            Row::Variable(index) => self.variable_title(*index),
         }
     }
 
     pub fn shown(&self, row: &Row) -> Shown {
         match row {
+            Row::Environment | Row::Variable(_) => self.environment_shown(row),
             Row::Item { .. } => Shown::Opens(String::new()),
             Row::Action(_) => Shown::Opens("run".into()),
             Row::Tag { tag, variants } => {
@@ -727,6 +743,7 @@ impl<'a> App<'a> {
                 lines.push("Enter: run (changes are saved first) · esc while it runs: stop".into());
                 (action.title.clone(), lines)
             }
+            Row::Environment | Row::Variable(_) => self.environment_details(row),
         }
     }
 
@@ -749,6 +766,7 @@ impl<'a> App<'a> {
                 }
             }
             Some(Row::Item { .. }) => hints.push("d delete"),
+            Some(Row::Variable(_)) => hints.push("enter set value"),
             _ => {}
         }
         if self.is_collection() {
@@ -979,6 +997,8 @@ impl<'a> App<'a> {
                 }
             }
             Row::Action(_) => {}
+            Row::Environment => self.open_environment(),
+            Row::Variable(index) => self.edit_variable(index),
         }
     }
 
@@ -989,6 +1009,7 @@ impl<'a> App<'a> {
             title,
             cursor: 0,
             domain: None,
+            env: false,
         });
     }
 
@@ -1490,5 +1511,6 @@ fn remove(root: &mut Value, path: &[Seg]) -> Option<Value> {
     }
 }
 
+mod environment;
 #[cfg(test)]
 mod tests;

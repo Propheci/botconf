@@ -707,6 +707,7 @@ fn toy_description() -> botconf::Description {
     botconf::Description {
         title: "Toy".into(),
         description: String::new(),
+        env: Vec::new(),
         table: Table {
             entries: vec![
                 Entry::new("greeting", Node::Value(ValueKind::Text)),

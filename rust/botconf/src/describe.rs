@@ -61,6 +61,50 @@ pub struct Description {
     /// Shown at the top of the file and of a setup screen.
     pub description: String,
     pub table: Table,
+    /// The environment variables the program reads itself, by fixed names
+    /// no option holds (credentials, say): the setup screens set their values
+    /// in the env file.
+    pub env: Vec<Variable>,
+}
+
+/// An environment variable a program reads by its fixed name.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Variable {
+    pub name: String,
+    pub title: String,
+    pub description: String,
+    /// Masked on screen.
+    pub secret: bool,
+    /// The program does not start without it.
+    pub required: bool,
+}
+
+impl Variable {
+    pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            ..Self::default()
+        }
+    }
+
+    #[must_use]
+    pub fn title(mut self, title: impl Into<String>) -> Self {
+        self.title = title.into();
+        self
+    }
+
+    #[must_use]
+    pub fn secret(mut self) -> Self {
+        self.secret = true;
+        self
+    }
+
+    #[must_use]
+    pub fn required(mut self) -> Self {
+        self.required = true;
+        self
+    }
 }
 
 /// The options of a table, in file order.
@@ -240,7 +284,15 @@ impl Description {
             title: title.into(),
             description: description.into(),
             table,
+            env: Vec::new(),
         }
+    }
+
+    /// Adds the variables the program reads itself.
+    #[must_use]
+    pub fn with_env(mut self, variables: impl IntoIterator<Item = Variable>) -> Self {
+        self.env.extend(variables);
+        self
     }
 
     /// The runtime settings: every entry marked runtime, with its absolute

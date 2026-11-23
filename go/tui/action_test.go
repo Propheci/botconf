@@ -264,3 +264,46 @@ func TestManyMatchesScrollWithTheHighlight(t *testing.T) {
 		t.Fatalf("values %v", a.values)
 	}
 }
+
+func TestTheProgramsOwnVariablesAreSetOnTheEnvironmentScreen(t *testing.T) {
+	description, err := describe.Of("Chats", "", chats{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description.WithEnv(
+		describe.Variable{Name: "APP_ID", Title: "App id", Description: "From my.telegram.org.", Required: true},
+		describe.Variable{Name: "APP_HASH", Secret: true},
+	)
+	a := newApp(description, nil, ParseEnv("# mine\nAPP_HASH=abc\n"), ".env", fakeToken)
+	if got := titles(a); !reflect.DeepEqual(got, []string{"Home", "Notify", "Environment"}) {
+		t.Fatalf("root %v", got)
+	}
+	if got := a.shown(a.rows()[2]); got.text != "1 of 2 set" {
+		t.Fatalf("environment row %+v", got)
+	}
+	selectRow(t, a, "Environment")
+	press(a, "enter")
+	if got := titles(a); !reflect.DeepEqual(got, []string{"App id", "APP_HASH"}) {
+		t.Fatalf("variables %v", got)
+	}
+	if a.shown(a.rows()[0]).kind != shownMissing || a.shown(a.rows()[1]).text != "•••••• (set)" {
+		t.Fatalf("shown %+v %+v", a.shown(a.rows()[0]), a.shown(a.rows()[1]))
+	}
+	if title, details := a.details(a.rows()[0]); title != "App id" || !strings.Contains(details[1], "Variable: APP_ID, set in .env") {
+		t.Fatalf("details %q %v", title, details)
+	}
+	press(a, "enter")
+	typing(a, "12345")
+	press(a, "enter")
+	press(a, "down", "enter")
+	if !a.edit.secret {
+		t.Fatal("a secret variable is masked")
+	}
+	press(a, "esc", "esc")
+	if _, env := a.candidate(); env != "# mine\nAPP_HASH=abc\nAPP_ID=12345\n" || !a.dirty {
+		t.Fatalf("env %q", env)
+	}
+	if out := view(a, 120, 30); !strings.Contains(out, "Environment") {
+		t.Fatalf("drawn:\n%s", out)
+	}
+}

@@ -123,6 +123,25 @@ type Entry struct {
 type Description struct {
 	Title, Description string
 	Table              Table
+	// Env are the environment variables the program reads itself, by fixed
+	// names no option holds (credentials, say): the setup screens set their
+	// values in the env file.
+	Env []Variable
+}
+
+// Variable is an environment variable a program reads by its fixed name.
+type Variable struct {
+	Name, Title, Description string
+	// Secret: masked on screen.
+	Secret bool
+	// Required: the program does not start without it.
+	Required bool
+}
+
+// WithEnv adds the variables the program reads itself.
+func (d *Description) WithEnv(variables ...Variable) *Description {
+	d.Env = append(d.Env, variables...)
+	return d
 }
 
 // Of describes config's type (a struct, or a pointer to one) from its tags.

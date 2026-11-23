@@ -27,6 +27,8 @@ type screen struct {
 	// domain: a list of values from a domain (chats), its items picked by
 	// search.
 	domain string
+	// env: the Environment screen (the variables the program reads itself).
+	env bool
 }
 
 // row is one line of a screen: an entry of a table, an item of a list or a
@@ -37,9 +39,15 @@ type row struct {
 	label    string
 	isAction bool
 	action   int
+	// isEnv opens the Environment screen; variable is one of its rows.
+	isEnv    bool
+	variable *describe.Variable
 }
 
 func (r row) title() string {
+	if r.variable != nil {
+		return variableTitle(r.variable)
+	}
 	if r.entry != nil {
 		return r.entry.Title
 	}
@@ -279,6 +287,9 @@ func isTextList(node *describe.Node) bool {
 }
 
 func (a *app) rows() []row {
+	if a.screen().env {
+		return a.envRows()
+	}
 	path := a.screen().path
 	node := a.nodeAt(path)
 	if node == nil {
@@ -291,6 +302,9 @@ func (a *app) rows() []row {
 			rows = append(rows, row{entry: &node.Table.Entries[index]})
 		}
 		if len(path) == 0 {
+			if len(a.description.Env) > 0 {
+				rows = append(rows, envRow())
+			}
 			for index, action := range a.actions {
 				rows = append(rows, row{isAction: true, action: index, label: "▶ " + action.title})
 			}
@@ -329,6 +343,9 @@ func (a *app) isCollection() bool {
 func (a *app) child(s seg) []seg { return extend(a.screen().path, s) }
 
 func (a *app) shown(r row) shown {
+	if r.isEnv || r.variable != nil {
+		return a.envShown(r)
+	}
 	if r.isAction {
 		return shown{shownOpens, "run"}
 	}
@@ -385,6 +402,9 @@ func (a *app) envOf(entry *describe.Entry) (name, value string, named, set bool)
 
 // details is the details pane: the selected row's description and facts.
 func (a *app) details(r row) (string, []string) {
+	if r.isEnv || r.variable != nil {
+		return a.envDetails(r)
+	}
 	if r.isAction {
 		action := a.actions[r.action]
 		return action.title, []string{action.description,
@@ -456,6 +476,8 @@ func (a *app) hints() string {
 					hints = append(hints, "g generate")
 				}
 			}
+		case r.variable != nil:
+			hints = append(hints, "enter set value")
 		case r.item != nil:
 			hints = append(hints, "d delete")
 		}
@@ -563,6 +585,14 @@ func (a *app) browse(key string) effect {
 }
 
 func (a *app) activate(r row) {
+	switch {
+	case r.isEnv:
+		a.openEnv()
+		return
+	case r.variable != nil:
+		a.editVariable(r.variable)
+		return
+	}
 	if r.item != nil && a.screen().domain != "" {
 		// An item of a list of domain values is edited by search.
 		domain := a.screen().domain

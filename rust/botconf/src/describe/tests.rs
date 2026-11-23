@@ -65,6 +65,7 @@ fn sample() -> Description {
     Description {
         title: "Sample".into(),
         description: "A sample program.".into(),
+        env: Vec::new(),
         table: Table {
             entries: vec![
                 Entry {

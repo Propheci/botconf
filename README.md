@@ -70,22 +70,22 @@ not from crates.io or a Go proxy release:
 # SeaORM), `cli` (a clap subcommand to view and change the settings),
 # `derive` (`#[derive(Describe)]`, see "Describing the config file") and
 # `export` (back up and restore the settings, see "Backups").
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.15.1", features = ["cli", "derive", "sea-orm"] }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.16.0", features = ["cli", "derive", "sea-orm"] }
 # An offline setup screen (ratatui) over the config file's description.
-botconf-tui = { git = "https://github.com/propheci/botconf", tag = "v0.15.1" }
+botconf-tui = { git = "https://github.com/propheci/botconf", tag = "v0.16.0" }
 # The settings panel engine, for writing a front end. Feature: `sea-orm`
 # (keep the handles of long buttons in a SQL table).
-botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.15.1" }
+botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.16.0" }
 # A Telegram settings panel (teloxide) over a botconf store, drawn by the
 # engine. Feature: `sea-orm` (as above).
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.15.1", features = ["sea-orm"] }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.16.0", features = ["sea-orm"] }
 # The gRPC service (tonic 0.12) serving a store and its panel to remote
 # clients. Building it needs `protoc` on the PATH.
-botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.15.1" }
+botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.16.0" }
 # Only the messages and the client and server stubs (prost, tonic 0.12), for a
 # client that calls a settings service without the engine or the panel. Building
 # it needs `protoc` on the PATH.
-botconf-proto = { git = "https://github.com/propheci/botconf", tag = "v0.15.1" }
+botconf-proto = { git = "https://github.com/propheci/botconf", tag = "v0.16.0" }
 ```
 
 Minimum Rust: 1.95 for `botconf`, `botconf-derive`, `botconf-tui`,
@@ -98,7 +98,7 @@ objects to keep their written order.
 
 ```sh
 # Go: the settings client (see "Go" below)
-go get github.com/propheci/botconf/go@go/v0.15.1
+go get github.com/propheci/botconf/go@go/v0.16.0
 ```
 
 ### Reloading
@@ -372,6 +372,18 @@ variable's value in the env file (masked when secret; `g` generates a token),
 keeping the env file's other lines. A save is checked by the host's own
 loader first, then written atomically (a new env file readable by its owner
 only).
+
+Variables a program reads by fixed names, which no option holds (an app id,
+an account's password), are listed on the description, and the setup screen
+gives them an Environment screen of their own, their values set in the env
+file the same way:
+
+```rust
+let description = Description::of::<Config>("My bot", "")
+    .with_env([Variable::new("MYBOT_APP_ID", "From the developer console.").required()]);
+```
+
+Go: `description.WithEnv(describe.Variable{Name: "MYBOT_APP_ID", Required: true})`.
 
 The host may add two things:
 

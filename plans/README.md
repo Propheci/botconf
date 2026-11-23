@@ -758,3 +758,15 @@ each is marked in its plan):
   typed configuration, which adds defaults: an unchanged map of tables (an
   entry's unset fields) looked changed and was set again. wuphf's online
   import test caught it on its rules. Export tests clean (+1 case).
+
+- **`v0.16.0`, `go/v0.16.0` (2026-11-23).** The variables a program reads by
+  fixed names, which no option holds (Telegram's app id and hash, a phone,
+  a password), can be listed on the description (`Description::env`,
+  `Variable`, `with_env`; Go `Description.Env`, `WithEnv`), and both setup
+  screens show them on an Environment screen (a row on the root screen:
+  "n of m set"), each set in the env file like an option's variable
+  (masked when secret; required ones read "required" while unset).
+  **Breaking**: `Description` gains `env` (a struct literal needs it), the
+  Rust screen's `Row` gains `Environment` / `Variable` and `Screen` gains
+  `env`. For wuphf's Telegram connector, whose credentials setup could not
+  edit (plan 060's deviation). Tests in both languages.
