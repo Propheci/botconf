@@ -60,20 +60,20 @@ not from crates.io or a Go proxy release:
 # Cargo.toml
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
 # SeaORM) and `cli` (a clap subcommand to view and change the settings).
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.11.0", features = ["cli", "sea-orm"] }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.12.0", features = ["cli", "sea-orm"] }
 # The settings panel engine, for writing a front end. Feature: `sea-orm`
 # (keep the handles of long buttons in a SQL table).
-botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.11.0" }
+botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.12.0" }
 # A Telegram settings panel (teloxide) over a botconf store, drawn by the
 # engine. Feature: `sea-orm` (as above).
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.11.0", features = ["sea-orm"] }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.12.0", features = ["sea-orm"] }
 # The gRPC service (tonic 0.12) serving a store and its panel to remote
 # clients. Building it needs `protoc` on the PATH.
-botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.11.0" }
+botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.12.0" }
 # Only the messages and the client and server stubs (prost, tonic 0.12), for a
 # client that calls a settings service without the engine or the panel. Building
 # it needs `protoc` on the PATH.
-botconf-proto = { git = "https://github.com/propheci/botconf", tag = "v0.11.0" }
+botconf-proto = { git = "https://github.com/propheci/botconf", tag = "v0.12.0" }
 ```
 
 Minimum Rust: 1.95 for `botconf`, `botconf-panel`, `botconf-proto` and
@@ -85,7 +85,7 @@ objects to keep their written order.
 
 ```sh
 # Go: the settings client (see "Go" below)
-go get github.com/propheci/botconf/go@go/v0.11.0
+go get github.com/propheci/botconf/go@go/v0.12.0
 ```
 
 ### Reloading
@@ -270,6 +270,14 @@ reports what the user did:
 Drafts (see "Declaring settings") need nothing from a front end: a draft's
 buttons are ordinary tokens (long ones become handles), and a question asked
 on a draft carries it inside its `Question`, which stays opaque.
+
+Section actions let a page do something besides changing settings: a host
+lists, per section id, what it can do now with `Panel::section_actions`
+(each a `SectionAction { id, title }`, shown as a button after the section's
+settings), and runs a press with `Panel::on_action`, an async handler given
+the section, the action and the viewer's actor. Its text becomes the press's
+notice (`❌ <text>` for an error) and the section is redrawn; a press on an
+action the section no longer offers is stale. A front end needs nothing new.
 
 ### Tokens
 

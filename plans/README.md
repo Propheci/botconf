@@ -36,7 +36,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 11 | 011 | Drafts in the settings panel (`required`/`when` fields, `SettingsStore::check`) | P1 | M–L | 004, 005, 009, 010 | `v0.9.0`, `go/v0.9.0` | DONE (see execution notes) |
 | 12 | — | Owner request (2026-10-30): ‹ Back on every question (`Ask.back`); any press of the asking panel ends a pending question | P1 | S | 011 | `v0.10.0`, `go/v0.10.0` | DONE (see execution notes) |
 | 13 | 013 | Proto-only `botconf-proto` crate for clients that only call the service (wuphf 056) | P2 | S | 012 | `v0.11.0`, `go/v0.11.0` | DONE (see execution notes) |
-| 14 | 014 | Section actions: buttons on a section page that run the host's commands (wuphf 058) | P1 | S–M | 013 | `v0.12.0`, `go/v0.12.0` | IN PROGRESS |
+| 14 | 014 | Section actions: buttons on a section page that run the host's commands (wuphf 058) | P1 | S–M | 013 | `v0.12.0`, `go/v0.12.0` | DONE (see execution notes) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -646,3 +646,13 @@ each is marked in its plan):
     CI comments now name it as the crate that compiles `proto/`.
   - The wuphf plan that needs it is 056 (written as 054 before a renumber).
   Skipped: `nix flake check` (CI runs it).
+
+- **014 done 2026-11-23 (`v0.12.0`, `go/v0.12.0`).** `botconf-panel` only:
+  `SectionAction`, `ActionCall`, `Panel::section_actions` / `on_action`,
+  `Action::Run` (`X:<section>:<action>`, escaped), the action rows on a
+  section page, and the press. botconf-panel tests 46 → 52 (the token round
+  trip gained two `Run` cases in place); workspace gate in the dev shell:
+  143 tests, clippy and fmt (rustfmt nightly, taplo) clean. Mutation (no
+  "still offered" check) failed `an_action_no_longer_offered_is_stale`.
+  No proto or Go change: a press's notice and redraw already reach every
+  renderer. Skipped: `nix flake check` (CI runs it).
