@@ -48,7 +48,9 @@ func view(a *app, width, height int) string {
 	bodyHeight := max(height-2, 3)
 
 	var body string
-	if popup := popupView(a, min(width-4, 64)); popup != "" {
+	if a.mode == runningMode {
+		body = runningView(a, width, bodyHeight)
+	} else if popup := popupView(a, min(width-4, 64)); popup != "" {
 		body = lipgloss.Place(width, bodyHeight, lipgloss.Center, lipgloss.Center, popup)
 	} else if width >= sideBySide {
 		half := width / 2
@@ -169,8 +171,6 @@ func popupView(a *app, width int) string {
 			}
 		}
 		return frame(a.edit.title, body, bottom)
-	case runningMode:
-		return runningView(a, width)
 	case choosing:
 		var lines []string
 		for index, option := range a.choose.options {
@@ -205,19 +205,28 @@ func truncate(line string, width int) string {
 	return lipgloss.NewStyle().MaxWidth(width).Render(line)
 }
 
-// runningView is a running action: what it said, its QR code, its progress
-// and its question.
-func runningView(a *app, width int) string {
+// runningView is a running action over the whole body (width × height): what
+// it said, its QR code, its progress and its question.
+func runningView(a *app, width, height int) string {
+	width, height = max(width, 12), max(height, 3)
 	r := &a.running
 	var lines []string
 	if r.qr != "" {
-		if qr, ok := qrLines(r.qr); ok {
-			lines = append(lines, qr...)
-		} else {
+		// A wrapped or cut QR code does not scan: say what it needs. The box
+		// takes 4 columns (border, padding) and 4 rows (border, title, keys);
+		// the header and footer 2 more rows.
+		if qr, ok := qrLines(r.qr); !ok {
 			lines = append(lines, warn.Render("The QR code could not be drawn."))
+		} else if qrWidth := len([]rune(qr[0])); qrWidth+4 > width || len(qr)+4 > height {
+			lines = append(lines, warn.Render(fmt.Sprintf(
+				"The QR code needs a terminal of at least %d × %d: enlarge it.", qrWidth+4, len(qr)+6)))
+		} else {
+			lines = append(lines, qr...)
 		}
 	}
-	lines = append(lines, r.lines...)
+	// The latest lines that fit below the QR code.
+	room := max(height-6-len(lines), 0)
+	lines = append(lines, r.lines[max(len(r.lines)-room, 0):]...)
 	if r.progress != "" {
 		lines = append(lines, opens.Render(r.progress))
 	}
@@ -242,6 +251,9 @@ func runningView(a *app, width int) string {
 			lines = append(lines, r.notice)
 		}
 	}
+	for index, line := range lines {
+		lines[index] = truncate(line, width-4)
+	}
 	content := bold.Render(r.title) + "\n" + strings.Join(lines, "\n") + "\n" + dim.Render(bottom)
-	return box.Width(max(width-2, 10)).Render(content)
+	return box.Width(width - 2).Render(content)
 }
