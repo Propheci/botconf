@@ -431,6 +431,18 @@ fn entry_comment(out: &mut String, entry: &Entry) {
     }
 }
 
+/// `text` with every line that is not already a comment (or blank) commented
+/// out.
+fn comment_out(text: &str) -> String {
+    text.lines()
+        .map(|line| match line {
+            "" => "\n".to_owned(),
+            line if line.starts_with('#') => format!("{line}\n"),
+            line => format!("# {line}\n"),
+        })
+        .collect()
+}
+
 /// The values first, then the tables: TOML puts a table's keys before its
 /// sub-tables.
 fn render_table(out: &mut String, table: &Table, values: &Map<String, Value>, path: &[String]) {
@@ -457,10 +469,18 @@ fn render_table(out: &mut String, table: &Table, values: &Map<String, Value>, pa
         match &entry.node {
             Node::Table(inner) => {
                 entry_comment(out, entry);
-                let _ = writeln!(out, "[{}]", header(&path));
                 let empty = Map::new();
                 let inner_values = value.and_then(Value::as_object).unwrap_or(&empty);
-                render_table(out, inner, inner_values, &path);
+                // An optional table (an `Option`) left empty is written
+                // commented out: its header alone would make it present.
+                if entry.nullable && inner_values.is_empty() {
+                    let mut table = format!("[{}]\n", header(&path));
+                    render_table(&mut table, inner, inner_values, &path);
+                    out.push_str(&comment_out(&table));
+                } else {
+                    let _ = writeln!(out, "[{}]", header(&path));
+                    render_table(out, inner, inner_values, &path);
+                }
             }
             Node::List(inner) => {
                 entry_comment(out, entry);

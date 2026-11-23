@@ -221,3 +221,33 @@ func TestTitles(t *testing.T) {
 		t.Error(got)
 	}
 }
+
+func TestAnOptionalTableLeftEmptyStaysAbsent(t *testing.T) {
+	type nested struct {
+		Deep bool `toml:"deep"`
+	}
+	type inner struct {
+		ProviderID string `toml:"provider_id" doc:"Who serves."`
+		Nested     nested `toml:"nested"`
+	}
+	type outer struct {
+		Functions *inner `toml:"functions"`
+	}
+	described := MustOf("Outer", "", outer{})
+	for _, values := range []map[string]any{{}, {"functions": map[string]any{}}} {
+		rendered := described.Render(values)
+		if !strings.Contains(rendered, "# [functions]\n") || !strings.Contains(rendered, "# [functions.nested]\n") {
+			t.Fatalf("not commented out:\n%s", rendered)
+		}
+		var parsed outer
+		if err := toml.Unmarshal([]byte(rendered), &parsed); err != nil || parsed.Functions != nil {
+			t.Fatalf("read back %+v, %v from\n%s", parsed.Functions, err, rendered)
+		}
+	}
+	rendered := described.Render(map[string]any{"functions": map[string]any{"provider_id": "p"}})
+	var parsed outer
+	if err := toml.Unmarshal([]byte(rendered), &parsed); err != nil || parsed.Functions == nil ||
+		parsed.Functions.ProviderID != "p" {
+		t.Fatalf("read back %+v, %v from\n%s", parsed.Functions, err, rendered)
+	}
+}

@@ -394,3 +394,40 @@ fn per_entry_maps_and_summaries() {
             .contains("# A rule's id is how its conversations remember it.")
     );
 }
+
+#[test]
+fn an_optional_table_left_empty_stays_absent() {
+    #[derive(Describe, Deserialize)]
+    struct Outer {
+        #[serde(default)]
+        functions: Option<Inner>,
+    }
+    #[derive(Describe, Deserialize)]
+    #[allow(dead_code)]
+    struct Inner {
+        /// Who serves.
+        provider_id: String,
+        #[serde(default)]
+        nested: Nested,
+    }
+    #[derive(Default, Describe, Deserialize)]
+    #[allow(dead_code)]
+    struct Nested {
+        #[serde(default)]
+        deep: bool,
+    }
+    let description = Description::of::<Outer>("Outer", "");
+    for values in [json!({}), json!({"functions": {}})] {
+        let rendered = description.render(&values);
+        assert!(rendered.contains("# [functions]\n"), "{rendered}");
+        assert!(rendered.contains("# [functions.nested]\n"), "{rendered}");
+        let outer: Outer = Figment::from(Toml::string(&rendered)).extract().unwrap();
+        assert!(outer.functions.is_none(), "{rendered}");
+    }
+    let rendered = description.render(&json!({"functions": {"provider_id": "p"}}));
+    let outer: Outer = Figment::from(Toml::string(&rendered)).extract().unwrap();
+    assert_eq!(
+        outer.functions.map(|inner| inner.provider_id).as_deref(),
+        Some("p")
+    );
+}

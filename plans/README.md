@@ -693,3 +693,9 @@ each is marked in its plan):
   is the map of its entries' kind (`panel` names an entry's), as
   `RuntimeSetting::per_entry` declares it; wuphf's panel tests caught the bare
   form. botconf tests and clippy clean.
+
+- **`v0.13.3`, `go/v0.13.3` (2026-11-23).** An optional table (Rust `Option`,
+  Go pointer) left absent or empty is rendered commented out, header and all:
+  its header alone made it present (wuphf's Instagram `[functions]`). Tests
+  in both languages; botconf tests, clippy and the Go describe and tui tests
+  clean.

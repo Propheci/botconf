@@ -124,8 +124,17 @@ func renderTable(out *strings.Builder, table *Table, values map[string]any, path
 		entryComment(out, entry)
 		switch {
 		case entry.Node.Table != nil:
-			fmt.Fprintf(out, "[%s]\n", header(entryPath))
 			inner, _ := value.(map[string]any)
+			// An optional table (a pointer) left empty is written commented
+			// out: its header alone would make it present.
+			if entry.Nullable && len(inner) == 0 {
+				var table strings.Builder
+				fmt.Fprintf(&table, "[%s]\n", header(entryPath))
+				renderTable(&table, entry.Node.Table, inner, entryPath)
+				out.WriteString(commentOut(table.String()))
+				continue
+			}
+			fmt.Fprintf(out, "[%s]\n", header(entryPath))
 			renderTable(out, entry.Node.Table, inner, entryPath)
 		case entry.Node.List != nil:
 			items := asList(value)
@@ -300,4 +309,20 @@ func formatFloat(value float64) string {
 		return strconv.FormatFloat(value, 'f', 1, 64)
 	}
 	return strconv.FormatFloat(value, 'g', -1, 64)
+}
+
+// commentOut is text with every line that is not already a comment (or
+// blank) commented out.
+func commentOut(text string) string {
+	var out strings.Builder
+	for _, line := range strings.SplitAfter(text, "\n") {
+		if line == "" {
+			continue
+		}
+		if line != "\n" && !strings.HasPrefix(line, "#") {
+			out.WriteString("# ")
+		}
+		out.WriteString(line)
+	}
+	return out.String()
 }
