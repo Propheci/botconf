@@ -699,3 +699,8 @@ each is marked in its plan):
   its header alone made it present (wuphf's Instagram `[functions]`). Tests
   in both languages; botconf tests, clippy and the Go describe and tui tests
   clean.
+
+- **`v0.13.4`, `go/v0.13.4` (2026-11-23).** `go/tui` splits a key message
+  holding several quickly typed characters into as many keys, and types a
+  paste into the open input (bubbletea reads them as one message; a pty test
+  of wuphf's setup lost its keys). Go tui tests clean.

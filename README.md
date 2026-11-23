@@ -69,22 +69,22 @@ not from crates.io or a Go proxy release:
 # The core. Features: `sea-orm` (keep the overrides in a SQL table with
 # SeaORM), `cli` (a clap subcommand to view and change the settings) and
 # `derive` (`#[derive(Describe)]`, see "Describing the config file").
-botconf = { git = "https://github.com/propheci/botconf", tag = "v0.13.3", features = ["cli", "derive", "sea-orm"] }
+botconf = { git = "https://github.com/propheci/botconf", tag = "v0.13.4", features = ["cli", "derive", "sea-orm"] }
 # An offline setup screen (ratatui) over the config file's description.
-botconf-tui = { git = "https://github.com/propheci/botconf", tag = "v0.13.3" }
+botconf-tui = { git = "https://github.com/propheci/botconf", tag = "v0.13.4" }
 # The settings panel engine, for writing a front end. Feature: `sea-orm`
 # (keep the handles of long buttons in a SQL table).
-botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.13.3" }
+botconf-panel = { git = "https://github.com/propheci/botconf", tag = "v0.13.4" }
 # A Telegram settings panel (teloxide) over a botconf store, drawn by the
 # engine. Feature: `sea-orm` (as above).
-botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.13.3", features = ["sea-orm"] }
+botconf-telegram = { git = "https://github.com/propheci/botconf", tag = "v0.13.4", features = ["sea-orm"] }
 # The gRPC service (tonic 0.12) serving a store and its panel to remote
 # clients. Building it needs `protoc` on the PATH.
-botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.13.3" }
+botconf-grpc = { git = "https://github.com/propheci/botconf", tag = "v0.13.4" }
 # Only the messages and the client and server stubs (prost, tonic 0.12), for a
 # client that calls a settings service without the engine or the panel. Building
 # it needs `protoc` on the PATH.
-botconf-proto = { git = "https://github.com/propheci/botconf", tag = "v0.13.3" }
+botconf-proto = { git = "https://github.com/propheci/botconf", tag = "v0.13.4" }
 ```
 
 Minimum Rust: 1.95 for `botconf`, `botconf-derive`, `botconf-tui`,
@@ -97,7 +97,7 @@ objects to keep their written order.
 
 ```sh
 # Go: the settings client (see "Go" below)
-go get github.com/propheci/botconf/go@go/v0.13.3
+go get github.com/propheci/botconf/go@go/v0.13.4
 ```
 
 ### Reloading

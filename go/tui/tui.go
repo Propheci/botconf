@@ -75,19 +75,43 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyMsg:
-		var runes []rune
-		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
-			runes = msg.Runes
-		}
-		switch m.app.key(msg.String(), runes) {
-		case quitEffect:
-			return m, tea.Quit
-		case saveEffect:
-			notice, err := m.save()
-			m.app.saved(notice, err)
+		for _, press := range presses(msg) {
+			switch m.app.key(press.key, press.runes) {
+			case quitEffect:
+				return m, tea.Quit
+			case saveEffect:
+				notice, err := m.save()
+				m.app.saved(notice, err)
+			}
 		}
 	}
 	return m, nil
+}
+
+// keyPress is one key as the app takes it: its name and the text it types.
+type keyPress struct {
+	key   string
+	runes []rune
+}
+
+// presses splits a key message into the app's keys: bubbletea reads
+// characters typed in quick succession as one message ("jjg"), which are as
+// many keys; a paste is text, typed into an input and ignored elsewhere.
+func presses(msg tea.KeyMsg) []keyPress {
+	switch {
+	case msg.Paste:
+		return []keyPress{{key: "", runes: msg.Runes}}
+	case msg.Type == tea.KeyRunes && len(msg.Runes) > 1 && !msg.Alt:
+		out := make([]keyPress, len(msg.Runes))
+		for index, r := range msg.Runes {
+			out[index] = keyPress{key: string(r), runes: []rune{r}}
+		}
+		return out
+	case msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace:
+		return []keyPress{{key: msg.String(), runes: msg.Runes}}
+	default:
+		return []keyPress{{key: msg.String()}}
+	}
 }
 
 func (m *model) View() string { return view(m.app, m.width, m.height) }

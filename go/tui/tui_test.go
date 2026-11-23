@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/propheci/botconf/go/describe"
 )
@@ -325,5 +326,31 @@ func TestEnvFile(t *testing.T) {
 	second, _ := GenerateToken()
 	if len(first) != 64 || first == second {
 		t.Fatalf("tokens %q %q", first, second)
+	}
+}
+
+func TestQuickKeysAndPastesAreSplit(t *testing.T) {
+	quick := presses(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("jjg")})
+	if len(quick) != 3 || quick[2].key != "g" || string(quick[2].runes) != "g" {
+		t.Fatalf("quick keys %+v", quick)
+	}
+	paste := presses(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a b"), Paste: true})
+	if len(paste) != 1 || paste[0].key != "" || string(paste[0].runes) != "a b" {
+		t.Fatalf("paste %+v", paste)
+	}
+	if enter := presses(tea.KeyMsg{Type: tea.KeyEnter}); enter[0].key != "enter" || enter[0].runes != nil {
+		t.Fatalf("enter %+v", enter)
+	}
+	// A paste types into an input; elsewhere it does nothing.
+	a := newSample(t, nil, "")
+	a.key("", []rune("ignored"))
+	if a.mode != browsing || len(a.values) != 0 {
+		t.Fatal("a paste while browsing acted")
+	}
+	press(a, "enter")
+	a.key("", []rune("127.0.0.1:9"))
+	press(a, "enter")
+	if a.values["listen"] != "127.0.0.1:9" {
+		t.Fatalf("values %v", a.values)
 	}
 }
