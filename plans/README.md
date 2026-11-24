@@ -40,6 +40,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 15 | 015 | Describe the whole config file from its type (derive + Go reflection); generated examples; offline setup TUIs (`botconf-tui`, `go/tui`) (wuphf 059, 060) | P1 | XL | 014 | `v0.13.0`, `go/v0.13.0` | DONE (see execution notes) |
 | 16 | 016 | Export and import: one commented TOML backup of the effective settings (file + stored overrides), offline and over gRPC; secrets only with a flag (wuphf 061) | P1 | M–L | 015 | `v0.15.0`, `go/v0.15.0` | DONE |
 | 17 | 017 | Setup actions (host tasks with questions, QR codes, progress) and value suggestions by domain in the setup screens (wuphf 062, 063) | P1 | M–L | 015 | `v0.14.0`, `go/v0.14.0` | DONE |
+| 18 | 018 | Data pages: host-defined list, detail, confirm, question and choice screens fed by a `DataSource`, and where the panel was opened (`Viewer.context`) (wuphf 074–077) | P1 | M–L | `v0.16.1` | `v0.17.0`, `go/v0.17.0` | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
