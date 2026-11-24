@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 
 use crate::{
     Action, ActionCall, AskKind, Input, Limits, Page, Panel, PanelError, Question, Reaction,
-    Screen, SectionAction, Target,
+    Screen, SectionAction, SettingQuestion, Target,
     testing::{FLAVOURS, FakeNames, LIMITS, Toy, panel, viewer},
     tokens::{HANDLE_LEN, MemoryTokenStore},
 };
@@ -793,7 +793,11 @@ async fn new_route(panel: &Panel<Toy>, name: &str) -> Reaction<Toy> {
 async fn fill_in(panel: &Panel<Toy>, screen: &Screen, field: &str, text: &str) -> Screen {
     let page = press_screen(panel, &find(screen, &format!("{field}:"))).await;
     let ask = press(panel, &find(&page, "✏️ Change")).await.ask.unwrap();
-    assert!(ask.question.draft.is_some(), "{:?}", ask.question);
+    assert!(
+        matches!(&ask.question, Question::Setting(question) if question.draft.is_some()),
+        "{:?}",
+        ask.question
+    );
     panel
         .answer(&ask.question, typed(text), &viewer(&FakeNames, &LIMITS))
         .await
@@ -963,11 +967,11 @@ fn old_questions_still_parse() {
         ))
     );
 
-    let drafted = Question {
+    let drafted = Question::Setting(SettingQuestion {
         target: Target::setting(3).entry("r|1").field(1),
         ask: AskKind::Value,
         draft: Some(json!({"kind": "a|%7C", "x": "1:2"})),
-    };
+    });
     assert_eq!(Question::parse(&drafted.encode()), Some(drafted));
 }
 

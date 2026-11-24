@@ -113,6 +113,10 @@ fn viewer<'a, R: PanelBot>(
         limits,
         names: names.map(|names| names as &dyn botconf_panel::Names),
         pickers: prompts::pickers_work_in(chat),
+        context: Some(botconf_panel::Context {
+            chat: chat.id.to_string(),
+            thread: None,
+        }),
     }
 }
 

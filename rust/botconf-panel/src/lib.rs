@@ -23,6 +23,9 @@
 //! persistent store, so that those buttons keep working after a restart.
 
 mod command;
+mod data;
+#[cfg(test)]
+mod data_tests;
 mod edit;
 mod input;
 mod press;
@@ -48,6 +51,10 @@ use serde_json::Value;
 #[cfg(feature = "sea-orm")]
 pub use self::tokens::{DEFAULT_TOKENS_TABLE, SeaOrmTokenStore, create_tokens_table};
 pub use self::{
+    data::{
+        ActOutcome, DataAction, DataActionKind, DataChoice, DataInput, DataItem, DataPage,
+        DataSource, DataViewer, InputKind, Paging,
+    },
     text::{Span, Style, Text},
     token::{Action, AskKind, Page, Target},
     tokens::{MemoryTokenStore, TokenStore},
@@ -96,18 +103,30 @@ pub struct Viewer<'a> {
     /// Whether the front end can show its pickers in this conversation (e.g.
     /// Telegram's work only in private chats).
     pub pickers: bool,
+    /// Where the panel was opened, when the front end knows: a data source
+    /// may open on the page about that chat (see [`DataSource::open`]).
+    pub context: Option<Context>,
 }
 
 impl<'a> Viewer<'a> {
-    /// A viewer with no names and no pickers.
+    /// A viewer with no names, no pickers and no context.
     pub fn new(limits: &'a Limits) -> Self {
         Self {
             actor: None,
             limits,
             names: None,
             pickers: false,
+            context: None,
         }
     }
+}
+
+/// The front end's native chat the panel was opened in (for Telegram, the
+/// chat or the forum topic the command was sent in).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Context {
+    pub chat: String,
+    pub thread: Option<String>,
 }
 
 /// The name of a user, a chat, or anything else a reference points at.
@@ -197,7 +216,16 @@ pub struct Picker {
 
 /// What the panel asked; kept by the front end until answered.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Question {
+pub enum Question {
+    /// About a setting.
+    Setting(SettingQuestion),
+    /// For an action of a data page (see [`DataSource`]).
+    Data(DataQuestion),
+}
+
+/// A question about a setting.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SettingQuestion {
     pub target: Target,
     pub ask: AskKind,
     /// The draft the answer goes into (see [`Page::Draft`]), when the
@@ -205,28 +233,59 @@ pub struct Question {
     pub draft: Option<Value>,
 }
 
+/// The answer an `Ask` action of a data page waits for: the page's route and
+/// the action's id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DataQuestion {
+    pub route: String,
+    pub action: String,
+}
+
+/// Marks an encoded [`DataQuestion`]; never an [`AskKind`] code.
+const DATA_QUESTION: &str = "y";
+
 impl Question {
     /// A question about the stored settings.
     pub fn new(target: Target, ask: AskKind) -> Self {
-        Self {
+        Self::Setting(SettingQuestion {
             target,
             ask,
             draft: None,
-        }
+        })
     }
 
-    /// A compact form, e.g. for a client that keeps it as text:
-    /// `<ask>:<target>`, then `|<draft>` with `%` and `|` escaped.
+    /// A compact form, e.g. for a client that keeps it as text. A setting's
+    /// question is `<ask>:<target>`, then `|<draft>` with `%` and `|`
+    /// escaped; a data page's is `y:<route>:<action>`, both escaped.
     pub fn encode(&self) -> String {
-        let mut text = format!("{}:{}", self.ask.code(), self.target.encode());
-        if let Some(draft) = &self.draft {
-            text.push('|');
-            text.push_str(&draft.to_string().replace('%', "%25").replace('|', "%7C"));
+        match self {
+            Self::Setting(question) => {
+                let mut text = format!("{}:{}", question.ask.code(), question.target.encode());
+                if let Some(draft) = &question.draft {
+                    text.push('|');
+                    text.push_str(&draft.to_string().replace('%', "%25").replace('|', "%7C"));
+                }
+                text
+            }
+            Self::Data(question) => format!(
+                "{DATA_QUESTION}:{}:{}",
+                token::escape(&question.route),
+                token::escape(&question.action)
+            ),
         }
-        text
     }
 
     pub fn parse(text: &str) -> Option<Self> {
+        if let Some(data) = text
+            .strip_prefix(DATA_QUESTION)
+            .and_then(|rest| rest.strip_prefix(':'))
+        {
+            let (route, action) = data.split_once(':')?;
+            return Some(Self::Data(DataQuestion {
+                route: token::unescape(route),
+                action: token::unescape(action),
+            }));
+        }
         // Questions encoded before drafts existed have no `|<draft>`; an entry
         // name may hold a `|`, so the text is read whole when what follows
         // the last `|` is not a draft.
@@ -239,11 +298,11 @@ impl Question {
             None => (text, None),
         };
         let (ask, target) = text.split_once(':')?;
-        Some(Self {
+        Some(Self::Setting(SettingQuestion {
             target: Target::parse(target)?,
             ask: AskKind::parse(ask)?,
             draft,
-        })
+        }))
     }
 }
 
@@ -417,6 +476,14 @@ pub struct Panel<S: Schema> {
     on_action: Option<ActionHandler>,
     stored_label: String,
     clock: Clock,
+    /// The host's data pages, behind an entry button on the home screen.
+    data: Option<DataEntry>,
+}
+
+/// The host's data pages: the home screen's entry button, and their source.
+pub(crate) struct DataEntry {
+    pub(crate) title: String,
+    pub(crate) source: Arc<dyn DataSource>,
 }
 
 impl<S: Schema> Panel<S> {
@@ -435,7 +502,19 @@ impl<S: Schema> Panel<S> {
             on_action: None,
             stored_label: "changed at runtime ✏️".into(),
             clock: Arc::new(system_now),
+            data: None,
         }
+    }
+
+    /// The host's data pages, opened from the home screen's `entry_title`
+    /// button (e.g. `🗄 Data`) at the root route `""`.
+    #[must_use]
+    pub fn data(mut self, entry_title: impl Into<String>, source: impl DataSource) -> Self {
+        self.data = Some(DataEntry {
+            title: entry_title.into(),
+            source: Arc::new(source),
+        });
+        self
     }
 
     /// Where the handles of long buttons are kept.

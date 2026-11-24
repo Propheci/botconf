@@ -40,7 +40,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 15 | 015 | Describe the whole config file from its type (derive + Go reflection); generated examples; offline setup TUIs (`botconf-tui`, `go/tui`) (wuphf 059, 060) | P1 | XL | 014 | `v0.13.0`, `go/v0.13.0` | DONE (see execution notes) |
 | 16 | 016 | Export and import: one commented TOML backup of the effective settings (file + stored overrides), offline and over gRPC; secrets only with a flag (wuphf 061) | P1 | M–L | 015 | `v0.15.0`, `go/v0.15.0` | DONE |
 | 17 | 017 | Setup actions (host tasks with questions, QR codes, progress) and value suggestions by domain in the setup screens (wuphf 062, 063) | P1 | M–L | 015 | `v0.14.0`, `go/v0.14.0` | DONE |
-| 18 | 018 | Data pages: host-defined list, detail, confirm, question and choice screens fed by a `DataSource`, and where the panel was opened (`Viewer.context`) (wuphf 074–077) | P1 | M–L | `v0.16.1` | `v0.17.0`, `go/v0.17.0` | TODO |
+| 18 | 018 | Data pages: host-defined list, detail, confirm, question and choice screens fed by a `DataSource`, and where the panel was opened (`Viewer.context`) (wuphf 074–077) | P1 | M–L | `v0.16.1` | `v0.17.0`, `go/v0.17.0` | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -771,3 +771,40 @@ each is marked in its plan):
   Rust screen's `Row` gains `Environment` / `Variable` and `Screen` gains
   `env`. For wuphf's Telegram connector, whose credentials setup could not
   edit (plan 060's deviation). Tests in both languages.
+
+- **`v0.17.0`, `go/v0.17.0` (2026-11-25), plan 018, for wuphf 079 (the
+  Health page) and 074–077.** Data pages, in `botconf-panel::data`:
+  - `DataSource` (`page`, `act`, `open`), `DataPage`, `DataItem`,
+    `DataAction` / `DataActionKind` (`Go`, `Run`, `Confirm`, `Ask`,
+    `Choose`), `DataInput`, `ActOutcome`, `Paging`, `DataViewer`.
+  - `Panel::data(entry_title, source)` adds the home screen's entry button.
+    `Page::Data(route)` renders a data page as an ordinary screen.
+  - New actions: `DataPress` (the page is read again; then it runs,
+    confirms, offers its choices or asks) and `DataDo` (runs after Yes or
+    a choice, still offered).
+  - `Viewer.context` (`Context { chat, thread }`) and `Panel::open`. The
+    command, and gRPC `Render` without a page, open on `DataSource::open`'s
+    page.
+  - Proto: `Context`, `RenderRequest.context`, `ActRequest.context`. Go:
+    `settings.Opened()` and `View.Context`. The Rust Telegram front end
+    passes its chat.
+  - **Breaking**:
+    - `Question` is an enum: `Setting(SettingQuestion)`, the old struct, or
+      `Data(DataQuestion { route, action })`, encoded `y:<route>:<action>`.
+      `Question::new` still makes a setting's question.
+    - `Viewer` gains `context`: struct literals need it.
+    - `Page` and `Action` gain variants.
+  - Deviations:
+    - `Paging` holds the neighbouring routes (`prev`, `next`) rather than a
+      page number and `more`: the panel can't build a host's routes.
+    - The text is cut by the front end, as settings screens are (Limits says
+      so), not by the panel.
+    - One data source per panel. A host with several areas lists them on
+      its root page.
+  - Tests:
+    - panel +10 (home entry, paging 25 → 10/10/5, Run, Confirm Yes/No,
+      stale action, Ask number with rejection and cancel, Choose, unreadable
+      page, open in context, no data source), and tokens round-trip the new
+      actions;
+    - Go +2 (`Opened`, `View.Context`).
+    Workspace 202 tests, clippy clean, Go vet and tests clean.

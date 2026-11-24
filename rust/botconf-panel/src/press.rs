@@ -5,7 +5,7 @@ use serde_json::Value;
 use botconf::{Catalog, Choices, Kind, Schema, SettingsError};
 
 use crate::{
-    ActionCall, Input, Panel, PanelError, Question, Reaction, Screen, Viewer,
+    ActionCall, Input, Panel, PanelError, Question, Reaction, Screen, SettingQuestion, Viewer,
     edit::{self, Edit},
     setting::Setting,
     text::Text,
@@ -114,7 +114,18 @@ impl<S: Schema> Panel<S> {
                 post: Some(self.render(&page, viewer).await),
                 ..Reaction::none()
             }),
-            Action::Ask(target, ask) => self.ask(Question::new(target, ask), viewer).await,
+            Action::Ask(target, ask) => {
+                let question = SettingQuestion {
+                    target,
+                    ask,
+                    draft: None,
+                };
+                self.ask(question, viewer).await
+            }
+            Action::DataPress(route, action) => self.data_press(route, action, viewer).await,
+            Action::DataDo(route, action, choice) => {
+                self.data_do(route, action, choice, viewer).await
+            }
             Action::InDraft { value, then } => self.press_in_draft(value, *then, viewer).await,
             Action::Run(section, action) => self.run(section, action, viewer).await,
             Action::SaveDraft(target, value) => {
@@ -153,7 +164,7 @@ impl<S: Schema> Panel<S> {
     /// Asks `question`.
     async fn ask(
         &self,
-        question: Question,
+        question: SettingQuestion,
         viewer: &Viewer<'_>,
     ) -> Result<Reaction<S>, PanelError> {
         let catalog = self.store.catalog();
@@ -187,7 +198,7 @@ impl<S: Schema> Panel<S> {
                 ))
             }
             Action::Ask(target, ask) => {
-                let question = Question {
+                let question = SettingQuestion {
                     target,
                     ask,
                     draft: Some(value),
@@ -346,6 +357,19 @@ impl<S: Schema> Panel<S> {
     pub async fn answer(
         &self,
         question: &Question,
+        input: Input,
+        viewer: &Viewer<'_>,
+    ) -> Result<Reaction<S>, PanelError> {
+        match question {
+            Question::Setting(question) => self.answer_setting(question, input, viewer).await,
+            Question::Data(question) => self.data_answer(question, input, viewer).await,
+        }
+    }
+
+    /// The user answered a question about a setting.
+    async fn answer_setting(
+        &self,
+        question: &SettingQuestion,
         input: Input,
         viewer: &Viewer<'_>,
     ) -> Result<Reaction<S>, PanelError> {
@@ -525,7 +549,9 @@ impl<S: Schema> Panel<S> {
             | Action::Close
             | Action::InDraft { .. }
             | Action::SaveDraft(..)
-            | Action::Run(..) => unreachable!("handled by press"),
+            | Action::Run(..)
+            | Action::DataPress(..)
+            | Action::DataDo(..) => unreachable!("handled by press"),
         };
         Ok((edit, Page::Setting(target)))
     }

@@ -5,8 +5,8 @@ use botconf::{
     command::{Listing, Outcome, ValueEntry},
 };
 use botconf_panel::{
-    Ask, ButtonView, CommandReply, Input, Limits, Page, PanelError, Reaction, Screen, Span, Style,
-    Text,
+    Ask, ButtonView, CommandReply, Context, Input, Limits, Page, PanelError, Reaction, Screen,
+    Span, Style, Text,
 };
 use serde_json::Value;
 use tonic::Status;
@@ -264,6 +264,14 @@ pub(crate) fn page(page: Option<&proto::Page>) -> Page {
     match page.and_then(|page| page.page.as_ref()) {
         None | Some(proto::page::Page::Home(_)) => Page::Home,
         Some(proto::page::Page::Section(id)) => Page::Section(id.clone()),
+    }
+}
+
+/// Where the panel is opened.
+pub(crate) fn context(context: proto::Context) -> Context {
+    Context {
+        chat: context.chat,
+        thread: context.thread,
     }
 }
 

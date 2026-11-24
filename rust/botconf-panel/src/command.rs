@@ -9,7 +9,6 @@ use botconf::{
 use crate::{
     CommandReply, Panel, PanelError, Viewer,
     text::{Span, Text},
-    token::Page,
 };
 
 /// A parsed invocation of the settings command.
@@ -32,7 +31,7 @@ impl<S: Schema> Panel<S> {
         let usage = usage(&self.command);
         let reply = |text: Text| CommandReply::Text { text, change: None };
         match parse_action(args) {
-            Ok(Action::Panel) => Ok(CommandReply::Panel(self.render(&Page::Home, viewer).await)),
+            Ok(Action::Panel) => Ok(CommandReply::Panel(self.open(viewer).await)),
             Ok(Action::Help) => Ok(reply(Text::plain(usage))),
             Ok(Action::Run(run)) => {
                 match command::execute(&self.store, run, viewer.actor.clone()).await {

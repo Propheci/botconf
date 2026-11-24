@@ -292,6 +292,34 @@ the section, the action and the viewer's actor. Its text becomes the press's
 notice (`❌ <text>` for an error) and the section is redrawn; a press on an
 action the section no longer offers is stale. A front end needs nothing new.
 
+Data pages are screens the host defines from its own data (a database, a
+health report), next to the settings. Register a `DataSource` with
+`Panel::data(entry_title, source)`: the home screen gains an `entry_title ›`
+button opening the root route `""`. The host names its pages by routes,
+opaque strings such as `conv/7/messages?p=2` (long ones become handles, like
+any button). `DataSource::page` returns a `DataPage`: a title and body, items
+(a button each, opening its route), actions, `Paging { prev, next }` (‹ Prev
+/ Next ›) and where ‹ Back leads. An action's `DataActionKind` says what a
+press does:
+
+- `Go(route)` opens a page; `Run` runs at once;
+- `Confirm { prompt }` asks ✅ Yes / ✖️ No first, and runs only on Yes;
+- `Ask { prompt, input }` asks for text or a whole number, through the usual
+  `Ask` / `Panel::answer` path (the question stays opaque);
+- `Choose { prompt, options }` offers a button per option.
+
+`DataSource::act` runs it and returns `ActOutcome::Show { route, notice }`
+or `ActOutcome::Message(text)` (shown with ‹ Back); an error is a `❌` notice
+over the page. A press reads the page again first, so an action the page no
+longer offers (or a choice it no longer has) does not run.
+
+`Viewer::context` says where the panel was opened (`Context { chat, thread
+}`, for Telegram the chat or topic of the command). `Panel::open`, which the
+command uses, asks `DataSource::open` for the page about that chat and opens
+there instead of the home screen. Over gRPC, a `RenderRequest` without a
+page opens the panel the same way, and `RenderRequest.context` /
+`ActRequest.context` carry it (Go: `settings.Opened()`, `View.Context`).
+
 ### Tokens
 
 A button's token is the stateless encoding of its action (e.g. `o:h`,

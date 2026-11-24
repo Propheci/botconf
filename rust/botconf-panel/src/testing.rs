@@ -356,5 +356,6 @@ pub fn viewer<'a>(names: &'a FakeNames, limits: &'a Limits) -> Viewer<'a> {
         limits,
         names: Some(names),
         pickers: true,
+        context: None,
     }
 }

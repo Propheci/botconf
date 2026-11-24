@@ -7,9 +7,11 @@ import (
 	"github.com/propheci/botconf/go/settingspb"
 )
 
-// Page is a page of the settings panel: the home screen or one section.
+// Page is a page of the settings panel: the home screen or one section, or
+// the panel as its command opens it.
 type Page struct {
 	section string
+	opened  bool
 }
 
 // Home is the panel's home screen: the core settings and a button per
@@ -19,7 +21,14 @@ func Home() Page { return Page{} }
 // Section is the page of one section, by its id.
 func Section(id string) Page { return Page{section: id} }
 
+// Opened is the panel as its command opens it: the host's page about
+// View.Context, when it has one, else the home screen.
+func Opened() Page { return Page{opened: true} }
+
 func (p Page) proto() *settingspb.Page {
+	if p.opened {
+		return nil
+	}
 	if p.section == "" {
 		return &settingspb.Page{Page: &settingspb.Page_Home{Home: &settingspb.HomePage{}}}
 	}
@@ -33,6 +42,27 @@ type View struct {
 	// Pickers says whether the platform's pickers (e.g. Telegram's user
 	// picker) can be offered in this conversation.
 	Pickers bool
+	// Context is where the panel is shown, when known (for Telegram, the
+	// chat and forum topic of the command).
+	Context *Context
+}
+
+// Context is the platform's chat the panel is shown in.
+type Context struct {
+	Chat string
+	// Thread is the topic or thread, when there is one.
+	Thread string
+}
+
+func (v View) context() *settingspb.Context {
+	if v.Context == nil {
+		return nil
+	}
+	wire := &settingspb.Context{Chat: v.Context.Chat}
+	if v.Context.Thread != "" {
+		wire.Thread = &v.Context.Thread
+	}
+	return wire
 }
 
 // Input answers one of the panel's questions: typed text, ids picked with a
@@ -78,6 +108,7 @@ func (c *Client) Render(ctx context.Context, actor *Actor, page Page, view View)
 		Page:    page.proto(),
 		Limits:  view.Limits,
 		Pickers: view.Pickers,
+		Context: view.context(),
 	})
 	if err != nil {
 		return nil, convert(err)
@@ -108,7 +139,7 @@ func (c *Client) Command(ctx context.Context, actor *Actor, view View, text stri
 }
 
 func (c *Client) act(ctx context.Context, actor *Actor, view View, set func(*settingspb.ActRequest)) (*settingspb.ActResponse, error) {
-	request := &settingspb.ActRequest{Actor: c.actor(actor), Limits: view.Limits, Pickers: view.Pickers}
+	request := &settingspb.ActRequest{Actor: c.actor(actor), Limits: view.Limits, Pickers: view.Pickers, Context: view.context()}
 	set(request)
 	response, err := c.api.Act(c.call(ctx), request)
 	return response, convert(err)

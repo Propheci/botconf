@@ -226,11 +226,12 @@ impl<S: Schema> Settings for SettingsService<S> {
             limits: &limits,
             names: self.names.as_deref(),
             pickers: message.pickers,
+            context: message.context.map(convert::context),
         };
-        let screen = self
-            .panel
-            .render(&convert::page(message.page.as_ref()), &viewer)
-            .await;
+        let screen = match message.page.as_ref() {
+            None => self.panel.open(&viewer).await,
+            page => self.panel.render(&convert::page(page), &viewer).await,
+        };
         Ok(Response::new(proto::RenderResponse {
             screen: Some(convert::screen(&screen)),
         }))
@@ -254,6 +255,7 @@ impl<S: Schema> Settings for SettingsService<S> {
             limits: &limits,
             names: self.names.as_deref(),
             pickers: message.pickers,
+            context: message.context.clone().map(convert::context),
         };
 
         let outcome = match message.act {

@@ -6,7 +6,7 @@ use serde_json::Value;
 use botconf::{Kind, Schema, Snapshot, keys::is_entry_name, parse_value};
 
 use crate::{
-    Ask, Domain, Input, Panel, Picker, Question, Viewer,
+    Ask, Domain, Input, Panel, Picker, Question, SettingQuestion, Viewer,
     edit::Edit,
     screens::{btn, in_draft, list, plain},
     setting::Setting,
@@ -26,7 +26,7 @@ const UNKNOWN_DOMAIN: Domain = Domain::new("", no_id);
 
 /// The page `question` was asked from, where ‹ Back and cancelling lead: the
 /// draft it was asked on, else the setting it is about.
-pub(crate) fn asked_from(question: &Question) -> Page {
+pub(crate) fn asked_from(question: &SettingQuestion) -> Page {
     match (&question.draft, question.target.parent()) {
         (Some(draft), Some(form)) => Page::Draft(form, draft.clone()),
         _ => Page::Setting(question.target.clone()),
@@ -43,7 +43,7 @@ impl<S: Schema> Panel<S> {
         &self,
         snapshot: &Snapshot<S>,
         setting: &Setting<'_>,
-        question: Question,
+        question: SettingQuestion,
         viewer: &Viewer<'_>,
     ) -> Ask {
         let title = setting.title();
@@ -150,7 +150,7 @@ impl<S: Schema> Panel<S> {
             .next();
 
         Ask {
-            question,
+            question: Question::Setting(question),
             title,
             text,
             picker,
@@ -165,7 +165,7 @@ impl<S: Schema> Panel<S> {
         &self,
         snapshot: &Snapshot<S>,
         setting: &Setting<'_>,
-        question: &Question,
+        question: &SettingQuestion,
         domain: &str,
         viewer: &Viewer<'_>,
     ) -> Vec<Vec<crate::ButtonView>> {
@@ -208,7 +208,7 @@ impl<S: Schema> Panel<S> {
         &self,
         snapshot: &Snapshot<S>,
         setting: &Setting<'_>,
-        question: &Question,
+        question: &SettingQuestion,
         input: Input,
         viewer: &Viewer<'_>,
     ) -> Result<(Edit, Page), String> {
@@ -259,7 +259,7 @@ impl<S: Schema> Panel<S> {
     pub(crate) async fn read_into_draft(
         &self,
         setting: &Setting<'_>,
-        question: &Question,
+        question: &SettingQuestion,
         draft: &Value,
         input: Input,
         viewer: &Viewer<'_>,

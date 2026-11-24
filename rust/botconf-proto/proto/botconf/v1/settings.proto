@@ -382,6 +382,13 @@ message ImportResponse {
 
 // ---- panel ----
 
+// The client's native chat the panel is opened in (for Telegram, the chat or
+// the forum topic the command was sent in).
+message Context {
+  string chat = 1;
+  optional string thread = 2;
+}
+
 // What the client can display. Screens and tokens are made to fit.
 message Limits {
   // The longest token a button can carry, in bytes (64 on Telegram).
@@ -492,12 +499,17 @@ message HomePage {}
 message RenderRequest {
   // Who is looking.
   Actor actor = 1;
-  // Which page; unset means the home screen.
+  // Which page; unset opens the panel as its command does (the page about
+  // `context`, when the host has one, else the home screen).
   Page page = 2;
   // What the client can display.
   Limits limits = 3;
   // Whether the client can show its pickers in this conversation.
   bool pickers = 4;
+  // Where the panel is opened, when the client knows: with no page, a host
+  // data source may open the panel on the page about this chat instead of
+  // the home screen.
+  optional Context context = 5;
 }
 
 // A page of the panel.
@@ -550,6 +562,8 @@ message ActRequest {
   }
   // Whether the client can show its pickers in this conversation.
   bool pickers = 6;
+  // Where the panel is, when the client knows (see RenderRequest.context).
+  optional Context context = 7;
 }
 
 // What the client should do now. Several fields may be set.

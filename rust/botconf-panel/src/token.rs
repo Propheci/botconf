@@ -106,12 +106,16 @@ pub enum Page {
     /// An unsaved value of a form (a setting or a map entry), being filled
     /// in: nothing is stored until it is saved.
     Draft(Target, Value),
+    /// A page of the host's data, by its route (see
+    /// [`crate::DataSource`]); `""` is the root.
+    Data(String),
 }
 
 impl Page {
     fn encode(&self) -> String {
         match self {
             Self::Home => "h".into(),
+            Self::Data(route) => format!("g:{}", escape(route)),
             Self::Section(id) => format!("m:{}", escape(id)),
             Self::Setting(target) => format!("s:{}", target.encode()),
             // Escaped, so that the JSON holds no separator (`:`, `@`).
@@ -124,6 +128,7 @@ impl Page {
     fn parse(code: &str, argument: Option<&str>) -> Option<Self> {
         match (code, argument) {
             ("h", None) => Some(Self::Home),
+            ("g", Some(route)) => Some(Self::Data(unescape(route))),
             ("m", Some(id)) if !id.is_empty() => Some(Self::Section(unescape(id))),
             ("s", Some(target)) => Some(Self::Setting(Target::parse(target)?)),
             ("d", Some(draft)) => {
@@ -214,6 +219,13 @@ pub enum Action {
     /// Runs the host's action (by id) offered on a section (by id); see
     /// [`crate::SectionAction`].
     Run(String, String),
+    /// Presses the action (by id) of the data page at the route: the page
+    /// is read again, and the action runs, confirms, asks or offers its
+    /// choices, as its kind says.
+    DataPress(String, String),
+    /// Runs the action (by id) of the data page at the route, with the
+    /// choice picked, if any: after ✅ Yes, or a choice's button.
+    DataDo(String, String, Option<String>),
 }
 
 impl Action {
@@ -250,6 +262,16 @@ impl Action {
             }
             Self::SaveDraft(to, draft) => value("S", to, draft),
             Self::Run(section, action) => format!("X:{}:{}", escape(section), escape(action)),
+            Self::DataPress(route, action) => format!("Y:{}:{}", escape(route), escape(action)),
+            Self::DataDo(route, action, None) => {
+                format!("Z:{}:{}", escape(route), escape(action))
+            }
+            Self::DataDo(route, action, Some(choice)) => format!(
+                "Z:{}:{}{PART_SEPARATOR}{}",
+                escape(route),
+                escape(action),
+                escape(choice)
+            ),
         }
     }
 
@@ -291,6 +313,13 @@ impl Action {
             },
             ("S", Some(draft)) => Self::SaveDraft(target()?, serde_json::from_str(draft).ok()?),
             ("X", Some(action)) => Self::Run(unescape(second?), unescape(action)),
+            ("Y", Some(action)) => Self::DataPress(unescape(second?), unescape(action)),
+            ("Z", Some(action)) => match action.split_once(PART_SEPARATOR) {
+                Some((action, choice)) => {
+                    Self::DataDo(unescape(second?), unescape(action), Some(unescape(choice)))
+                }
+                None => Self::DataDo(unescape(second?), unescape(action), None),
+            },
             ("R", None) if second.is_none() => Self::Reload,
             ("x", None) if second.is_none() => Self::Close,
             _ => return None,
@@ -316,7 +345,7 @@ fn split_part(code: &str, argument: Option<&str>) -> Option<(Page, usize)> {
 }
 
 /// Escapes the characters the encoding uses as separators.
-fn escape(text: &str) -> String {
+pub(crate) fn escape(text: &str) -> String {
     let mut escaped = String::with_capacity(text.len());
     for c in text.chars() {
         match c {
@@ -332,7 +361,7 @@ fn escape(text: &str) -> String {
 
 /// Undoes [`escape`]. A `%` not followed by a known code is kept as is, so
 /// that names written before escaping existed still read back.
-fn unescape(text: &str) -> String {
+pub(crate) fn unescape(text: &str) -> String {
     let mut text = text;
     let mut unescaped = String::with_capacity(text.len());
     while let Some(index) = text.find('%') {
@@ -416,6 +445,17 @@ mod tests {
             Action::SaveDraft(entry.clone(), json!({"kind": "b", "y": "a:b"})),
             Action::Run("connector:wa-1".into(), "resync".into()),
             Action::Run("a:b#c%e".into(), "x:y".into()),
+            Action::open(Page::Data(String::new())),
+            Action::Open(Page::Data("conv/7?q=a:b@c#d".into()), 2),
+            Action::Post(Page::Data("health".into())),
+            Action::DataPress("health".into(), "run".into()),
+            Action::DataPress(String::new(), "a:b@c".into()),
+            Action::DataDo("health/p:1".into(), "ignore".into(), None),
+            Action::DataDo(
+                "conv/7".into(),
+                "purge".into(),
+                Some("with@copies:all".into()),
+            ),
         ] {
             let token = action.encode();
             assert_eq!(Action::parse(&token), Some(action), "{token}");

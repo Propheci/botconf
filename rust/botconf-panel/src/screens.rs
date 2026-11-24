@@ -92,6 +92,7 @@ impl<S: Schema> Panel<S> {
                 }
                 _ => gone().await,
             },
+            Page::Data(route) => self.data_page(route, viewer).await,
         };
         if let Some(notice) = notice {
             building.text = building.text.with_notice(notice);
@@ -194,6 +195,9 @@ impl<S: Schema> Panel<S> {
             })
             .collect();
         rows.extend(buttons.chunks(2).map(<[_]>::to_vec));
+        if let Some(entry) = self.data_entry() {
+            rows.push(vec![entry]);
+        }
 
         Building {
             text,
