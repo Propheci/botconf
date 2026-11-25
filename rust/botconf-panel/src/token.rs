@@ -173,6 +173,14 @@ impl AskKind {
     }
 }
 
+/// Which of a reference question's candidates to show: those matching
+/// `query` (empty for all), from the `offset`th.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Browse {
+    pub query: String,
+    pub offset: usize,
+}
+
 /// What a button does.
 ///
 /// Choices of `Choices::Fixed` lists, which cannot change while the program
@@ -197,9 +205,14 @@ pub enum Action {
     PickValue(Target, Value),
     /// Adds an item to a list (a suggested reference).
     Add(Target, Value),
+    /// Sets a single-reference setting to a suggested reference.
+    PickRef(Target, Value),
     /// Removes an item from a list.
     Remove(Target, Value),
     Ask(Target, AskKind),
+    /// Asks again, showing another page of the candidates, or those matching
+    /// a search.
+    Find(Target, AskKind, Browse),
     /// Clears the value (`null`, or no field).
     Clear(Target),
     /// Goes back to the config file's value.
@@ -248,8 +261,17 @@ impl Action {
             Self::ToggleValue(to, item) => value("T", to, item),
             Self::PickValue(to, item) => value("P", to, item),
             Self::Add(to, item) => value("A", to, item),
+            Self::PickRef(to, item) => value("V", to, item),
             Self::Remove(to, item) => value("r", to, item),
             Self::Ask(to, ask) => format!("{}:{}", target("a", to), ask.code()),
+            // The query is escaped, so that it holds no `:`.
+            Self::Find(to, ask, browse) => format!(
+                "{}:{}:{}:{}",
+                target("F", to),
+                ask.code(),
+                browse.offset,
+                escape(&browse.query)
+            ),
             Self::Clear(to) => target("c", to),
             Self::Reset(to) => target("u", to),
             Self::Delete(to) => target("d", to),
@@ -300,10 +322,18 @@ impl Action {
             ("T", Some(item)) => Self::ToggleValue(target()?, serde_json::from_str(item).ok()?),
             ("P", Some(item)) => Self::PickValue(target()?, serde_json::from_str(item).ok()?),
             ("A", Some(item)) => Self::Add(target()?, serde_json::from_str(item).ok()?),
+            ("V", Some(item)) => Self::PickRef(target()?, serde_json::from_str(item).ok()?),
             // A non-JSON item is read as a string, as tokens drawn before
             // items were JSON carried them.
             ("r", Some(item)) => Self::Remove(target()?, value(item)),
             ("a", Some(ask)) => Self::Ask(target()?, AskKind::parse(ask)?),
+            ("F", Some(rest)) => {
+                let mut rest = rest.splitn(3, ':');
+                let ask = AskKind::parse(rest.next()?)?;
+                let offset = rest.next()?.parse().ok()?;
+                let query = unescape(rest.next()?);
+                Self::Find(target()?, ask, Browse { query, offset })
+            }
             ("c", None) => Self::Clear(target()?),
             ("u", None) => Self::Reset(target()?),
             ("d", None) => Self::Delete(target()?),
@@ -418,6 +448,16 @@ mod tests {
             Action::ToggleValue(setting.clone(), json!("lamp")),
             Action::PickValue(entry.clone(), json!("a:b@c")),
             Action::Add(setting.clone(), json!(-100123)),
+            Action::PickRef(field.clone(), json!("tg:a@b#c")),
+            Action::Find(setting.clone(), AskKind::Items, Browse::default()),
+            Action::Find(
+                field.clone(),
+                AskKind::Value,
+                Browse {
+                    query: "a:b%c#d@e f".into(),
+                    offset: 16,
+                },
+            ),
             Action::Remove(entry.clone(), json!(-100123)),
             Action::Remove(setting.clone(), json!("a:b")),
             Action::Remove(setting.clone(), json!("42")),

@@ -56,7 +56,7 @@ pub use self::{
         DataSource, DataViewer, InputKind, Paging,
     },
     text::{Span, Style, Text},
-    token::{Action, AskKind, Page, Target},
+    token::{Action, AskKind, Browse, Page, Target},
     tokens::{MemoryTokenStore, TokenStore},
 };
 
@@ -150,10 +150,10 @@ pub trait Names: Send + Sync {
         Box::pin(async { None })
     }
 
-    /// Ids worth offering as buttons when adding to a reference setting, e.g.
-    /// the chats a host has seen recently. `query` narrows them (empty for
-    /// all); the engine shows at most `limit`. Default: none, so only the
-    /// platform picker and typed ids are offered.
+    /// Ids worth offering as buttons when asking for a reference, e.g. the
+    /// chats a host has seen. `query` narrows them (empty for all). Return
+    /// at most `limit`, in a stable order: the engine pages through them.
+    /// Default: none, so only the platform picker and typed ids are offered.
     fn candidates<'a>(
         &'a self,
         _domain: &'a str,
@@ -161,6 +161,26 @@ pub trait Names: Send + Sync {
         _limit: usize,
     ) -> BoxFuture<'a, Vec<(Value, Name)>> {
         Box::pin(async { Vec::new() })
+    }
+
+    /// One page of the candidates matching `query`: at most `limit`, after
+    /// skipping the first `offset`, in `candidates`' order. Default: read
+    /// from `candidates`. Hosts with many ids can override it to skip in
+    /// place.
+    fn candidates_page<'a>(
+        &'a self,
+        domain: &'a str,
+        query: &'a str,
+        offset: usize,
+        limit: usize,
+    ) -> BoxFuture<'a, Vec<(Value, Name)>> {
+        Box::pin(async move {
+            let mut found = self
+                .candidates(domain, query, offset.saturating_add(limit))
+                .await;
+            found.drain(..offset.min(found.len()));
+            found
+        })
     }
 }
 

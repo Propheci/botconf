@@ -11,7 +11,7 @@ use crate::{
     screens::{btn, in_draft, list, plain},
     setting::Setting,
     text::{Span, Text},
-    token::{Action, AskKind, Page},
+    token::{Action, AskKind, Browse, Page},
 };
 
 /// In bytes: entry names are kept short, to read well on buttons.
@@ -38,12 +38,14 @@ fn no_id(_: &str) -> Option<Value> {
 }
 
 impl<S: Schema> Panel<S> {
-    /// The question asking for `ask` about `setting`.
+    /// The question asking for `ask` about `setting`, showing the page of
+    /// its candidates `browse` names (for a reference).
     pub(crate) async fn question(
         &self,
         snapshot: &Snapshot<S>,
         setting: &Setting<'_>,
         question: SettingQuestion,
+        browse: &Browse,
         viewer: &Viewer<'_>,
     ) -> Ask {
         let title = setting.title();
@@ -59,6 +61,14 @@ impl<S: Schema> Panel<S> {
             }
         };
 
+        let rows = match (question.ask, setting.kind) {
+            (AskKind::Value | AskKind::Items, Kind::Ref { domain, .. }) => {
+                self.candidate_rows(snapshot, setting, &question, domain, browse, viewer)
+                    .await
+            }
+            _ => Vec::new(),
+        };
+
         let mut text = Text::new();
         let mut picker = None;
         match (question.ask, setting.kind) {
@@ -66,6 +76,16 @@ impl<S: Schema> Panel<S> {
                 let known = self.domain_of(domain);
                 let described = known.copied().unwrap_or(UNKNOWN_DOMAIN);
                 let many = ask == AskKind::Items;
+                if !browse.query.is_empty() {
+                    text.push_plain(format!("{} matching ", capitalized(described.noun.1)))
+                        .push(Span::bold(format!("“{}”", browse.query)))
+                        .push_plain(":\n\n");
+                }
+                let hint = |text: &mut Text| {
+                    if !rows.is_empty() {
+                        text.push_plain("\nTap one below, or send part of a name to search.");
+                    }
+                };
                 let pick = described.pick.filter(|_| known.is_some() && viewer.pickers);
                 let verb = match pick {
                     Some((one, several)) => format!(
@@ -84,6 +104,7 @@ impl<S: Schema> Panel<S> {
                     text.push_plain(format!("{verb} {} to add to ", described.many))
                         .push(Span::bold(&title))
                         .push_plain(".");
+                    hint(&mut text);
                 } else {
                     text.push_plain(format!("{verb} {} for ", described.one))
                         .push(Span::bold(&title));
@@ -93,6 +114,7 @@ impl<S: Schema> Panel<S> {
                             .push_plain(")");
                     }
                     text.push_plain(".");
+                    hint(&mut text);
                     now(&mut text);
                 }
             }
@@ -132,13 +154,6 @@ impl<S: Schema> Panel<S> {
             }
         }
 
-        let rows = match (question.ask, setting.kind) {
-            (AskKind::Items, Kind::Ref { domain, .. }) => {
-                self.candidate_rows(snapshot, setting, &question, domain, viewer)
-                    .await
-            }
-            _ => Vec::new(),
-        };
         let back = self
             .issue_rows(
                 vec![vec![btn("‹ Back", Action::open(asked_from(&question)))]],
@@ -160,50 +175,80 @@ impl<S: Schema> Panel<S> {
         }
     }
 
-    /// Known references worth adding, as buttons.
+    /// One page of the known references, as buttons: those already chosen
+    /// marked (✅ removes one from a list), the others to add or pick, then
+    /// ◀ / ▶ to the neighbouring pages.
     async fn candidate_rows(
         &self,
         snapshot: &Snapshot<S>,
         setting: &Setting<'_>,
         question: &SettingQuestion,
         domain: &str,
+        browse: &Browse,
         viewer: &Viewer<'_>,
     ) -> Vec<Vec<crate::ButtonView>> {
         let Some(names) = viewer.names else {
             return Vec::new();
         };
-        let limit = viewer
-            .limits
-            .max_rows
-            .unwrap_or(MAX_CANDIDATES)
-            .clamp(1, MAX_CANDIDATES);
-        let listed = list(
-            match &question.draft {
-                Some(draft) => setting.value_in(draft),
-                None => setting.value(snapshot),
-            }
-            .as_ref(),
-        );
-        let rows: Vec<_> = names
-            .candidates(domain, "", limit + listed.len())
-            .await
+        let size = page_size(viewer.limits);
+        let mut found = names
+            .candidates_page(domain, &browse.query, browse.offset, size + 1)
+            .await;
+        let more = found.len() > size;
+        found.truncate(size);
+
+        let many = question.ask == AskKind::Items;
+        let current = match &question.draft {
+            Some(draft) => setting.value_in(draft),
+            None => setting.value(snapshot),
+        };
+        let chosen = if many {
+            list(current.as_ref())
+        } else {
+            current.into_iter().collect()
+        };
+        let target = &question.target;
+        let wrap = |action| match &question.draft {
+            Some(draft) => in_draft(draft, action),
+            None => action,
+        };
+
+        let mut rows: Vec<_> = found
             .into_iter()
-            .filter(|(id, _)| !listed.contains(id))
-            .take(limit)
             .map(|(id, name)| {
-                let add = Action::Add(question.target.clone(), id);
-                let action = match &question.draft {
-                    Some(draft) => in_draft(draft, add),
-                    None => add,
+                let (mark, action) = match (many, chosen.contains(&id)) {
+                    (true, true) => ("✅", Action::Remove(target.clone(), id)),
+                    (true, false) => ("➕", Action::Add(target.clone(), id)),
+                    (false, true) => ("🔘", Action::PickRef(target.clone(), id)),
+                    (false, false) => ("⚪", Action::PickRef(target.clone(), id)),
                 };
-                vec![btn(format!("➕ {}", name.short), action)]
+                vec![btn(format!("{mark} {}", name.short), wrap(action))]
             })
             .collect();
+        let page = |offset| {
+            let query = browse.query.clone();
+            wrap(Action::Find(
+                target.clone(),
+                question.ask,
+                Browse { query, offset },
+            ))
+        };
+        let mut nav = Vec::new();
+        if browse.offset > 0 {
+            nav.push(btn("◀", page(browse.offset.saturating_sub(size))));
+        }
+        if more {
+            nav.push(btn("▶", page(browse.offset + size)));
+        }
+        if !nav.is_empty() {
+            rows.push(nav);
+        }
         self.issue_rows(rows, viewer.limits).await
     }
 
     /// The edit an answer asks for, and the page to show afterwards. The
-    /// error says why the answer makes no sense; the user can try again.
+    /// error says why the answer was not taken: the user can try again, or
+    /// pick from what their text matches.
     pub(crate) async fn read(
         &self,
         snapshot: &Snapshot<S>,
@@ -211,7 +256,7 @@ impl<S: Schema> Panel<S> {
         question: &SettingQuestion,
         input: Input,
         viewer: &Viewer<'_>,
-    ) -> Result<(Edit, Page), String> {
+    ) -> Result<(Edit, Page), Unread> {
         let stay = Page::Setting(question.target.clone());
         let answer = match question.ask {
             AskKind::Value => {
@@ -232,10 +277,10 @@ impl<S: Schema> Panel<S> {
                     || name.contains([':', '#'])
                     || name.len() > MAX_ENTRY_NAME_LEN
                 {
-                    return Err(format!(
+                    return Err(Unread::Rejected(format!(
                         "`{name}` is not a valid name: use up to {MAX_ENTRY_NAME_LEN} bytes (a \
                          character or more each), without dots, colons or #"
-                    ));
+                    )));
                 }
                 let kind = entry_kind(setting.kind);
                 let value = match (rest.trim(), kind.empty_value()) {
@@ -255,7 +300,7 @@ impl<S: Schema> Panel<S> {
     }
 
     /// The draft `draft` with the answer to `question` (about one of its
-    /// fields) in it. The error says why the answer makes no sense.
+    /// fields) in it. The error says why the answer was not taken.
     pub(crate) async fn read_into_draft(
         &self,
         setting: &Setting<'_>,
@@ -263,7 +308,7 @@ impl<S: Schema> Panel<S> {
         draft: &Value,
         input: Input,
         viewer: &Viewer<'_>,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, Unread> {
         let field = match question.ask {
             AskKind::Value => self.value(setting.kind, input, viewer).await?,
             AskKind::Items => {
@@ -282,23 +327,26 @@ impl<S: Schema> Panel<S> {
     }
 
     /// A whole value.
-    async fn value(&self, kind: &Kind, input: Input, viewer: &Viewer<'_>) -> Result<Value, String> {
+    async fn value(&self, kind: &Kind, input: Input, viewer: &Viewer<'_>) -> Result<Value, Unread> {
         if let Kind::Ref { domain, .. } = kind {
             return match input {
                 Input::Picked {
                     domain: picked,
                     ids,
-                } => picked_ids(domain, &picked, ids)?
+                } => Ok(picked_ids(domain, &picked, ids)?
                     .into_iter()
                     .next()
-                    .ok_or_else(|| "pick one".to_string()),
-                Input::Text(text) => self.reference(domain, text.trim(), viewer).await,
+                    .ok_or_else(|| "pick one".to_string())?),
+                Input::Text(text) => Ok(self
+                    .references(domain, &text, false, viewer)
+                    .await?
+                    .remove(0)),
                 Input::Cancel => Err("cancelled".into()),
             };
         }
 
         match input {
-            Input::Text(text) if !text.trim().is_empty() => typed(kind, text.trim()),
+            Input::Text(text) if !text.trim().is_empty() => Ok(typed(kind, text.trim())?),
             _ => Err("send the value as text".into()),
         }
     }
@@ -309,7 +357,7 @@ impl<S: Schema> Panel<S> {
         kind: &Kind,
         input: Input,
         viewer: &Viewer<'_>,
-    ) -> Result<Vec<Value>, String> {
+    ) -> Result<Vec<Value>, Unread> {
         let text = match (input, kind) {
             (
                 Input::Picked {
@@ -318,61 +366,163 @@ impl<S: Schema> Panel<S> {
                 },
                 Kind::Ref { domain, .. },
             ) => {
-                return picked_ids(domain, &picked, ids);
+                return Ok(picked_ids(domain, &picked, ids)?);
+            }
+            (Input::Text(text), Kind::Ref { domain, .. }) => {
+                return self.references(domain, &text, true, viewer).await;
             }
             (Input::Text(text), _) => text,
             _ => return Err("send the items as text".into()),
         };
-
-        let words: Vec<_> = text
-            .split(|c: char| c.is_whitespace() || c == ',')
-            .filter(|word| !word.is_empty())
-            .collect();
+        let words = words(&text);
         if words.is_empty() {
             return Err("send at least one item".into());
         }
-
-        let mut items = Vec::new();
-        for word in words {
-            let item = match kind {
-                Kind::Ref { domain, .. } => self.reference(domain, word, viewer).await?,
-                _ => parse_value(word),
-            };
-            items.push(item);
-        }
-        Ok(items)
+        Ok(words.into_iter().map(parse_value).collect())
     }
 
-    /// A typed reference of `domain`: an id as the front end's domain reads
-    /// it, else what the names resolve it to, else the one suggestion that
-    /// matches it. Ids of domains the front end did not register are read as
-    /// JSON or as a string.
-    async fn reference(
+    /// The references of `domain` typed in `text`: one for a single value,
+    /// or several (`many`), split on spaces and commas. In this order:
+    ///
+    /// 1. each word as one reference (see [`Self::found`]);
+    /// 2. the whole text as a name, which may hold spaces;
+    /// 3. a search, when the text, or a word of it, matches several candidates:
+    ///    the user picks from those;
+    /// 4. else the domain's "unknown" error. For a domain the front end did not
+    ///    register, the words are taken as typed (JSON, or strings).
+    async fn references(
         &self,
         domain: &str,
-        word: &str,
+        text: &str,
+        many: bool,
         viewer: &Viewer<'_>,
-    ) -> Result<Value, String> {
-        if word.is_empty() {
-            return Err("send the id as text".into());
+    ) -> Result<Vec<Value>, Unread> {
+        let text = text.trim();
+        let words = if many { words(text) } else { vec![text] };
+        if words.iter().all(|word| word.is_empty()) {
+            return Err(if many {
+                "send at least one item"
+            } else {
+                "send the id as text"
+            }
+            .into());
         }
+
+        let mut found = Vec::with_capacity(words.len());
+        for word in &words {
+            found.push(self.found(domain, word, true, viewer).await);
+        }
+        if found.iter().all(|found| matches!(found, Found::One(_))) {
+            return Ok(found
+                .into_iter()
+                .filter_map(|found| match found {
+                    Found::One(id) => Some(id),
+                    _ => None,
+                })
+                .collect());
+        }
+        if words.len() > 1 {
+            match self.found(domain, text, false, viewer).await {
+                Found::One(id) => return Ok(vec![id]),
+                Found::Several => return Err(Unread::Search(text.to_string())),
+                Found::Nothing => {}
+            }
+        }
+        if let Some(position) = found
+            .iter()
+            .position(|found| matches!(found, Found::Several))
+        {
+            return Err(Unread::Search(words[position].to_string()));
+        }
+
         let known = self.domain_of(domain);
-        if let Some(id) = known.and_then(|known| (known.parse)(word)) {
-            return Ok(id);
-        }
-        if let Some(names) = viewer.names {
-            if let Some(id) = names.resolve(domain, word).await {
-                return Ok(id);
-            }
-            let mut matches = names.candidates(domain, word, 2).await;
-            if matches.len() == 1 {
-                return Ok(matches.remove(0).0);
+        let mut ids = Vec::with_capacity(words.len());
+        for (word, found) in words.into_iter().zip(found) {
+            match (found, known) {
+                (Found::One(id), _) => ids.push(id),
+                (_, Some(known)) => return Err(Unread::Rejected((known.unknown)(word))),
+                (_, None) => ids.push(parse_value(word)),
             }
         }
-        match known {
-            Some(known) => Err((known.unknown)(word)),
-            None => Ok(parse_value(word)),
+        Ok(ids)
+    }
+
+    /// What `word` names in `domain`: an id as the front end's domain reads
+    /// it (when `as_id`), else what the names resolve it to, else the one
+    /// candidate that matches it.
+    async fn found(&self, domain: &str, word: &str, as_id: bool, viewer: &Viewer<'_>) -> Found {
+        let id = as_id
+            .then(|| self.domain_of(domain))
+            .flatten()
+            .and_then(|known| (known.parse)(word));
+        if let Some(id) = id {
+            return Found::One(id);
         }
+        let Some(names) = viewer.names else {
+            return Found::Nothing;
+        };
+        if let Some(id) = names.resolve(domain, word).await {
+            return Found::One(id);
+        }
+        let mut matches = names.candidates(domain, word, 2).await;
+        match matches.len() {
+            0 => Found::Nothing,
+            1 => Found::One(matches.remove(0).0),
+            _ => Found::Several,
+        }
+    }
+}
+
+/// Why an answer was not taken.
+#[derive(Debug)]
+pub(crate) enum Unread {
+    /// It makes no sense; the user can try again.
+    Rejected(String),
+    /// It matches several references: ask again, showing those.
+    Search(String),
+}
+
+impl From<String> for Unread {
+    fn from(problem: String) -> Self {
+        Self::Rejected(problem)
+    }
+}
+
+impl From<&str> for Unread {
+    fn from(problem: &str) -> Self {
+        Self::Rejected(problem.to_string())
+    }
+}
+
+/// What a typed word names.
+enum Found {
+    One(Value),
+    Several,
+    Nothing,
+}
+
+/// The words of a typed list: split on spaces and commas.
+fn words(text: &str) -> Vec<&str> {
+    text.split(|c: char| c.is_whitespace() || c == ',')
+        .filter(|word| !word.is_empty())
+        .collect()
+}
+
+/// How many candidates a question shows at once: [`MAX_CANDIDATES`], or
+/// fewer when the front end's rows are limited (◀ / ▶ and ‹ Back need two).
+fn page_size(limits: &crate::Limits) -> usize {
+    limits
+        .max_rows
+        .map_or(MAX_CANDIDATES, |rows| rows.saturating_sub(2))
+        .clamp(1, MAX_CANDIDATES)
+}
+
+/// `text` with its first letter in upper case.
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
     }
 }
 

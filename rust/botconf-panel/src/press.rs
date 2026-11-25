@@ -7,9 +7,10 @@ use botconf::{Catalog, Choices, Kind, Schema, SettingsError};
 use crate::{
     ActionCall, Input, Panel, PanelError, Question, Reaction, Screen, SettingQuestion, Viewer,
     edit::{self, Edit},
+    input::Unread,
     setting::Setting,
     text::Text,
-    token::{Action, Page, Target},
+    token::{Action, Browse, Page, Target},
     tokens::Redeemed,
 };
 
@@ -120,7 +121,15 @@ impl<S: Schema> Panel<S> {
                     ask,
                     draft: None,
                 };
-                self.ask(question, viewer).await
+                self.ask(question, &Browse::default(), viewer).await
+            }
+            Action::Find(target, ask, browse) => {
+                let question = SettingQuestion {
+                    target,
+                    ask,
+                    draft: None,
+                };
+                self.ask(question, &browse, viewer).await
             }
             Action::DataPress(route, action) => self.data_press(route, action, viewer).await,
             Action::DataDo(route, action, choice) => {
@@ -161,10 +170,11 @@ impl<S: Schema> Panel<S> {
         }
     }
 
-    /// Asks `question`.
+    /// Asks `question`, showing the page of its candidates `browse` names.
     async fn ask(
         &self,
         question: SettingQuestion,
+        browse: &Browse,
         viewer: &Viewer<'_>,
     ) -> Result<Reaction<S>, PanelError> {
         let catalog = self.store.catalog();
@@ -174,12 +184,32 @@ impl<S: Schema> Panel<S> {
         let snapshot = self.store.current();
         Ok(Reaction {
             ask: Some(
-                self.question(&snapshot, &setting, question.clone(), viewer)
+                self.question(&snapshot, &setting, question.clone(), browse, viewer)
                     .await,
             ),
             notice: Some("✏️ Waiting for your answer".into()),
             ..Reaction::none()
         })
+    }
+
+    /// The reaction to an answer that was not taken: the problem, or the
+    /// question asked again with the candidates the answer matches.
+    async fn unread(
+        &self,
+        question: &SettingQuestion,
+        unread: Unread,
+        viewer: &Viewer<'_>,
+    ) -> Result<Reaction<S>, PanelError> {
+        match unread {
+            Unread::Rejected(problem) => Err(PanelError::Rejected(problem)),
+            Unread::Search(query) => {
+                let browse = Browse { query, offset: 0 };
+                Ok(Reaction {
+                    notice: None,
+                    ..self.ask(question.clone(), &browse, viewer).await?
+                })
+            }
+        }
     }
 
     /// A button of a draft's page was pressed: it changes the draft `value`.
@@ -203,7 +233,15 @@ impl<S: Schema> Panel<S> {
                     ask,
                     draft: Some(value),
                 };
-                self.ask(question, viewer).await
+                self.ask(question, &Browse::default(), viewer).await
+            }
+            Action::Find(target, ask, browse) => {
+                let question = SettingQuestion {
+                    target,
+                    ask,
+                    draft: Some(value),
+                };
+                self.ask(question, &browse, viewer).await
             }
             action => match self.draft_edit(&value, action) {
                 Ok((form, draft)) => Ok(Reaction::screen(
@@ -238,6 +276,7 @@ impl<S: Schema> Panel<S> {
             | Action::ToggleValue(target, _)
             | Action::Pick(target, _)
             | Action::PickValue(target, _)
+            | Action::PickRef(target, _)
             | Action::Add(target, _)
             | Action::Remove(target, _)
             | Action::Clear(target) => target.clone(),
@@ -288,6 +327,12 @@ impl<S: Schema> Panel<S> {
                     return Err(changed());
                 };
                 Some(setting.kind.choice_value(&picked))
+            }
+            Action::PickRef(_, picked) => {
+                if !is_single_ref(setting.kind) {
+                    return Err(changed());
+                }
+                Some(picked)
             }
             Action::Add(_, item) => {
                 let mut items = list_of(current);
@@ -391,13 +436,15 @@ impl<S: Schema> Panel<S> {
                     ..Reaction::screen(self.render(&Page::Draft(form, draft.clone()), viewer).await)
                 });
             }
-            let draft = self
+            return match self
                 .read_into_draft(&setting, question, draft, input, viewer)
                 .await
-                .map_err(PanelError::Rejected)?;
-            return Ok(Reaction::screen(
-                self.render(&Page::Draft(form, draft), viewer).await,
-            ));
+            {
+                Ok(draft) => Ok(Reaction::screen(
+                    self.render(&Page::Draft(form, draft), viewer).await,
+                )),
+                Err(unread) => self.unread(question, unread, viewer).await,
+            };
         }
 
         let page = Page::Setting(question.target.clone());
@@ -420,7 +467,7 @@ impl<S: Schema> Panel<S> {
                 self.apply(edit, &page, viewer, |error| error.to_string())
                     .await
             }
-            Err(problem) => Err(PanelError::Rejected(problem)),
+            Err(unread) => self.unread(question, unread, viewer).await,
         }
     }
 
@@ -512,6 +559,14 @@ impl<S: Schema> Panel<S> {
                 };
                 return pick(&setting, &snapshot, &target, &value);
             }
+            Action::PickRef(target, item) => {
+                let setting = resolve(&target)?;
+                if !is_single_ref(setting.kind) {
+                    return Err(changed(&target));
+                }
+                let edit = setting.set(&snapshot, Some(item));
+                (target, edit)
+            }
             Action::Add(target, item) => {
                 let setting = resolve(&target)?;
                 let edit = setting.change_list(&snapshot, vec![item], None);
@@ -546,6 +601,7 @@ impl<S: Schema> Panel<S> {
             Action::Open(..)
             | Action::Post(_)
             | Action::Ask(..)
+            | Action::Find(..)
             | Action::Close
             | Action::InDraft { .. }
             | Action::SaveDraft(..)
@@ -560,6 +616,11 @@ impl<S: Schema> Panel<S> {
 /// The setting `target` refers to.
 fn resolve<'a>(catalog: &'a Catalog, target: &'a Target) -> Result<Setting<'a>, Problem> {
     Setting::resolve(catalog, target).ok_or(Problem::Rejected(GONE))
+}
+
+/// Whether a setting holds one reference, which `PickRef` sets.
+fn is_single_ref(kind: &Kind) -> bool {
+    matches!(kind, Kind::Ref { many: false, .. })
 }
 
 /// Whether the choices a setting offers are compiled in, so that buttons may

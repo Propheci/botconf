@@ -175,6 +175,7 @@ const ROUTE_FIELDS: &[Field] = &[
     Field::new("y", "Y", Kind::text(true))
         .required()
         .when("kind", "b"),
+    Field::new("room", "Room", Kind::reference("toy.room", false)),
 ];
 const ROUTE_FORM: &Form = &Form::new(ROUTE_FIELDS, r#"{"kind": "a"}"#);
 const ROUTE: &Kind = &Kind::form(ROUTE_FORM);
@@ -293,25 +294,31 @@ impl Names for FakeNames {
         query: &'a str,
         limit: usize,
     ) -> BoxFuture<'a, Vec<(Value, Name)>> {
-        let rooms = [("r1", "Kitchen"), ("r2", "Garden"), ("r3", "Garage")];
-        let found = if domain == "toy.room" {
-            rooms
-                .iter()
-                .filter(|(_, name)| name.to_lowercase().contains(&query.to_lowercase()))
-                .take(limit)
-                .map(|(id, name)| {
-                    (
-                        Value::from(*id),
-                        Name {
-                            full: (*name).into(),
-                            short: (*name).into(),
-                        },
-                    )
-                })
-                .collect()
-        } else {
-            Vec::new()
+        // 20 rooms: three named ones, then "Hall 01" (r4) to "Hall 17" (r20).
+        let rooms = [("r1", "Kitchen"), ("r2", "Garden"), ("r3", "Garage")]
+            .map(|(id, name)| (Value::from(id), name.to_string()))
+            .into_iter()
+            .chain((1..=17).map(|n| (Value::from(format!("r{}", n + 3)), format!("Hall {n:02}"))));
+        let chats = [(-100, "Family"), (-101, "Friends"), (-102, "Work")]
+            .map(|(id, name)| (Value::from(id), name.to_string()));
+        let candidates: Vec<(Value, String)> = match domain {
+            "toy.room" => rooms.collect(),
+            CHAT => chats.into(),
+            _ => Vec::new(),
         };
+        let query = query.to_lowercase();
+        let found = candidates
+            .into_iter()
+            .filter(|(_, name)| name.to_lowercase().contains(&query))
+            .take(limit)
+            .map(|(id, name)| {
+                let name = Name {
+                    full: name.clone(),
+                    short: name,
+                };
+                (id, name)
+            })
+            .collect();
         Box::pin(async move { found })
     }
 }

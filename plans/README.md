@@ -41,6 +41,7 @@ pinned to 0.1.1 or `--ignore-rust-version`, see 002).
 | 16 | 016 | Export and import: one commented TOML backup of the effective settings (file + stored overrides), offline and over gRPC; secrets only with a flag (wuphf 061) | P1 | M–L | 015 | `v0.15.0`, `go/v0.15.0` | DONE |
 | 17 | 017 | Setup actions (host tasks with questions, QR codes, progress) and value suggestions by domain in the setup screens (wuphf 062, 063) | P1 | M–L | 015 | `v0.14.0`, `go/v0.14.0` | DONE |
 | 18 | 018 | Data pages: host-defined list, detail, confirm, question and choice screens fed by a `DataSource`, and where the panel was opened (`Viewer.context`) (wuphf 074–077) | P1 | M–L | `v0.16.1` | `v0.17.0`, `go/v0.17.0` | DONE |
+| 19 | 019 | Reference questions page through every candidate (◀ / ▶, chosen ones ✅ / 🔘), a typed name that matches several is a search, and single references are picked from candidates (wuphf 082) | P1 | S–M | `v0.17.0` | `v0.18.0` | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) |
 REJECTED (with one-line rationale).
@@ -808,3 +809,34 @@ each is marked in its plan):
       actions;
     - Go +2 (`Opened`, `View.Context`).
     Workspace 202 tests, clippy clean, Go vet and tests clean.
+
+- **`v0.18.0` (2026-11-25), plan 019, for wuphf 082.** Reference questions
+  reach every candidate. The owner could not find a chat in wuphf's chat
+  pickers: only the first 8 were offered.
+  - A reference question, whether a list or one value, shows a page of
+    candidates (8, or the front end's rows less 2), with ◀ / ▶ on their own
+    row.
+    - Chosen ones are marked: ✅ in a list (pressing removes it), 🔘 for one
+      value. The rest show ➕ (adds) or ⚪ (sets, new `Action::PickRef`).
+    - Single references had no candidates before.
+  - A typed answer is read in this order:
+    - each word as one reference;
+    - then the whole text as a name, which may hold spaces;
+    - then, when it or one of its words matches several candidates, a
+      search: the question is asked again with "<Nouns> matching “…”:" and
+      those candidates;
+    - else the domain's error, or the text taken as typed for an
+      unregistered domain, as before. An ambiguous typed word used to be
+      taken as typed there.
+  - `Action::Find(target, ask, Browse { query, offset })`, encoded
+    `F:<target>:<ask>:<offset>:<query>`, and `Action::PickRef`, `V:`. Both
+    work on drafts, through `InDraft`.
+  - `Names::candidates_page(domain, query, offset, limit)`, a default method
+    over `candidates`, so hosts need no change.
+  - **Breaking**: `Action` gains variants; `Browse` is exported. No proto
+    or Go change.
+  - Tests: panel +4 (paging 20 → 8/8/4 and smaller pages, names with
+    spaces then search, a single reference, on a draft), the candidates
+    test rewritten, and tokens round-trip the new actions. The toy's rooms
+    are now 20, its chats 3, and its route form has a room field.
+    Workspace tests and clippy are clean.

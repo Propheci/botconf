@@ -10,7 +10,7 @@ use botconf::{DynamicSection, Kind, RuntimeSetting};
 use serde_json::{Value, json};
 
 use crate::{
-    Action, ActionCall, AskKind, Input, Limits, Page, Panel, PanelError, Question, Reaction,
+    Action, ActionCall, Ask, AskKind, Input, Limits, Page, Panel, PanelError, Question, Reaction,
     Screen, SectionAction, SettingQuestion, Target,
     testing::{FLAVOURS, FakeNames, LIMITS, Toy, panel, viewer},
     tokens::{HANDLE_LEN, MemoryTokenStore},
@@ -730,32 +730,247 @@ async fn ref_items_offer_candidates() {
     let rooms = target(&panel, "rooms");
     let screen = render(&panel, &Page::Setting(rooms.clone())).await;
     let ask = press(&panel, &find(&screen, "➕ Add")).await.ask.unwrap();
-    let suggested: Vec<_> = ask
-        .rows
-        .iter()
-        .flatten()
-        .map(|b| b.label.as_str())
-        .collect();
-    // Kitchen (r1) is listed already.
-    assert_eq!(suggested, ["➕ Garden", "➕ Garage"]);
+    // Kitchen (r1) is listed already: ✅, and pressing it removes it.
+    assert_eq!(
+        ask_labels(&ask)[..4],
+        ["✅ Kitchen", "➕ Garden", "➕ Garage", "➕ Hall 01"]
+    );
+    assert!(
+        ask.text
+            .to_plain()
+            .contains("send part of a name to search"),
+        "{}",
+        ask.text.to_plain()
+    );
 
-    let garden = ask.rows[0][0].token.clone();
-    press(&panel, &garden).await;
+    press(&panel, &ask_find(&ask, "➕ Garden")).await;
     assert_eq!(value(&panel, "rooms"), Some(json!(["r1", "r2"])));
+    press(&panel, &ask_find(&ask, "✅ Kitchen")).await;
+    assert_eq!(value(&panel, "rooms"), Some(json!(["r2"])));
 
-    // A typed name that matches one suggestion adds it; an ambiguous one is
-    // taken as typed.
+    // A typed name that matches one candidate adds it.
     answer(&panel, rooms.clone(), AskKind::Items, typed("garage"))
         .await
         .unwrap();
-    assert_eq!(value(&panel, "rooms"), Some(json!(["r1", "r2", "r3"])));
-    answer(&panel, rooms, AskKind::Items, typed("ga"))
+    assert_eq!(value(&panel, "rooms"), Some(json!(["r2", "r3"])));
+
+    // One that matches several asks again with those, to pick from.
+    let search = answer(&panel, rooms.clone(), AskKind::Items, typed("ga"))
+        .await
+        .unwrap()
+        .ask
+        .unwrap();
+    assert_eq!(ask_labels(&search), ["✅ Garden", "✅ Garage"]);
+    assert!(
+        search.text.to_plain().starts_with("Items matching “ga”:"),
+        "{}",
+        search.text.to_plain()
+    );
+    assert_eq!(value(&panel, "rooms"), Some(json!(["r2", "r3"])));
+
+    // One that matches nothing, in a domain the front end does not know, is
+    // taken as typed.
+    answer(&panel, rooms, AskKind::Items, typed("attic"))
+        .await
+        .unwrap();
+    assert_eq!(value(&panel, "rooms"), Some(json!(["r2", "r3", "attic"])));
+}
+
+#[tokio::test]
+async fn ref_candidates_page_through_all() {
+    let panel = panel().await;
+    let rooms = target(&panel, "rooms");
+    let screen = render(&panel, &Page::Setting(rooms)).await;
+    let first = press(&panel, &find(&screen, "➕ Add")).await.ask.unwrap();
+    let nav = |ask: &Ask| {
+        ask.rows
+            .last()
+            .unwrap()
+            .iter()
+            .map(|b| b.label.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(first.rows.len(), 9, "8 rooms, then ▶");
+    assert_eq!(nav(&first), ["▶"]);
+
+    let second = press(&panel, &ask_find(&first, "▶")).await.ask.unwrap();
+    assert_eq!(second.rows.len(), 9);
+    assert_eq!(nav(&second), ["◀", "▶"]);
+    let third = press(&panel, &ask_find(&second, "▶")).await.ask.unwrap();
+    assert_eq!(third.rows.len(), 5, "the last 4 rooms, then ◀");
+    assert_eq!(nav(&third), ["◀"]);
+    let back = press(&panel, &ask_find(&third, "◀")).await.ask.unwrap();
+    assert_eq!(ask_labels(&back), ask_labels(&second));
+
+    let mut all: Vec<_> = [&first, &second, &third]
+        .into_iter()
+        .flat_map(ask_labels)
+        .filter(|label| label.starts_with('➕'))
+        .collect();
+    all.dedup();
+    assert_eq!(all.len(), 20, "{all:?}");
+
+    // Fewer rows on the front end: smaller pages.
+    let limits = Limits {
+        max_rows: Some(5),
+        ..LIMITS
+    };
+    let small = panel
+        .press(&find(&screen, "➕ Add"), &viewer(&FakeNames, &limits))
+        .await
+        .unwrap()
+        .ask
+        .unwrap();
+    assert_eq!(small.rows.len(), 4, "3 rooms, then ▶");
+}
+
+#[tokio::test]
+async fn a_typed_name_with_spaces_is_read_whole_then_searched() {
+    let panel = panel().await;
+    let rooms = target(&panel, "rooms");
+
+    // "hall" and "17" alone are not one room each, but "hall 17" is.
+    answer(&panel, rooms.clone(), AskKind::Items, typed("hall 17"))
+        .await
+        .unwrap();
+    assert_eq!(value(&panel, "rooms"), Some(json!(["r20"])));
+
+    // Several words that match several rooms: a search, whole.
+    let search = answer(&panel, rooms.clone(), AskKind::Items, typed("hall 1"))
+        .await
+        .unwrap()
+        .ask
+        .unwrap();
+    assert!(
+        search
+            .text
+            .to_plain()
+            .starts_with("Items matching “hall 1”:"),
+        "{}",
+        search.text.to_plain()
+    );
+    let labels = ask_labels(&search);
+    assert_eq!(labels.len(), 8, "Hall 10 to Hall 17, no ▶: {labels:?}");
+    assert_eq!(labels[0], "➕ Hall 10");
+    assert_eq!(labels[7], "✅ Hall 17");
+
+    // Pressing one adds it.
+    let page = press(&panel, &ask_find(&search, "➕ Hall 12")).await;
+    assert!(page.ask.is_none());
+    assert_eq!(value(&panel, "rooms"), Some(json!(["r20", "r15"])));
+
+    // Words that are each one room are added each.
+    answer(&panel, rooms, AskKind::Items, typed("kitchen, garden"))
         .await
         .unwrap();
     assert_eq!(
         value(&panel, "rooms"),
-        Some(json!(["r1", "r2", "r3", "ga"]))
+        Some(json!(["r20", "r15", "r1", "r2"]))
     );
+}
+
+#[tokio::test]
+async fn a_single_reference_is_picked_from_candidates() {
+    let panel = panel().await;
+    let alerts = target(&panel, "alerts_chat");
+    let screen = render(&panel, &Page::Setting(alerts.clone())).await;
+    let ask = press(&panel, &find(&screen, "Change")).await.ask.unwrap();
+    assert_eq!(ask_labels(&ask), ["⚪ Family", "⚪ Friends", "⚪ Work"]);
+
+    press(&panel, &ask_find(&ask, "Friends")).await;
+    assert_eq!(value(&panel, "alerts_chat"), Some(json!(-101)));
+    let again = press(&panel, &find(&screen, "Change")).await.ask.unwrap();
+    assert_eq!(ask_labels(&again), ["⚪ Family", "🔘 Friends", "⚪ Work"]);
+
+    // Several matches: pick from them; one: set; an id: set.
+    let search = answer(&panel, alerts.clone(), AskKind::Value, typed("f"))
+        .await
+        .unwrap()
+        .ask
+        .unwrap();
+    assert_eq!(ask_labels(&search), ["⚪ Family", "🔘 Friends"]);
+    answer(&panel, alerts.clone(), AskKind::Value, typed("work"))
+        .await
+        .unwrap();
+    assert_eq!(value(&panel, "alerts_chat"), Some(json!(-102)));
+    answer(&panel, alerts, AskKind::Value, typed("-555"))
+        .await
+        .unwrap();
+    assert_eq!(value(&panel, "alerts_chat"), Some(json!(-555)));
+}
+
+#[tokio::test]
+async fn candidates_on_a_draft_change_the_draft() {
+    let panel = panel().await;
+    let routes = target(&panel, "routes");
+    let draft = answer(&panel, routes, AskKind::Entry, typed("home"))
+        .await
+        .unwrap()
+        .screen
+        .unwrap();
+    let field = press_screen(&panel, &find(&draft, "Room:")).await;
+    let ask = press(&panel, &find(&field, "✏️ Change")).await.ask.unwrap();
+    let next = press(&panel, &ask_find(&ask, "▶")).await.ask.unwrap();
+    assert!(
+        matches!(&next.question, Question::Setting(question) if question.draft.is_some()),
+        "{:?}",
+        next.question
+    );
+    let redrawn = press_screen(&panel, &ask_find(&next, "Hall 06")).await;
+    assert!(
+        labels(&redrawn).iter().any(|label| label == "Room: r9 ›"),
+        "{:?}",
+        labels(&redrawn)
+    );
+    // Nothing is stored until the draft is saved.
+    assert!(
+        value(&panel, "routes")
+            .and_then(|routes| routes.get("home").cloned())
+            .is_none()
+    );
+
+    // A search on a draft's question keeps the draft.
+    let question = match next.question {
+        Question::Setting(question) => question,
+        Question::Data(_) => unreachable!(),
+    };
+    let search = panel
+        .answer(
+            &Question::Setting(question),
+            typed("hall 0"),
+            &viewer(&FakeNames, &LIMITS),
+        )
+        .await
+        .unwrap()
+        .ask
+        .unwrap();
+    assert!(
+        matches!(&search.question, Question::Setting(question) if question.draft.is_some()),
+        "{:?}",
+        search.question
+    );
+    assert_eq!(ask_labels(&search).len(), 8);
+}
+
+/// The labels of a question's buttons, ◀ / ▶ included.
+fn ask_labels(ask: &Ask) -> Vec<String> {
+    ask.rows
+        .iter()
+        .flatten()
+        .map(|button| button.label.clone())
+        .filter(|label| label != "◀" && label != "▶")
+        .collect()
+}
+
+/// The token of the question's button whose label contains `label`.
+fn ask_find(ask: &Ask, label: &str) -> String {
+    ask.rows
+        .iter()
+        .flatten()
+        .find(|button| button.label.contains(label))
+        .unwrap_or_else(|| panic!("no {label:?} in {:?}", ask.rows))
+        .token
+        .clone()
 }
 
 #[tokio::test]
