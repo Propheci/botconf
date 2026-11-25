@@ -32,6 +32,7 @@ type BotPanel struct {
 	pickers     bool
 	resolvePeer func(tg.PeerClass) (tg.InputPeerClass, error)
 	questions   *settings.Questions
+	contextFor  ContextFunc
 }
 
 // BotOption configures a BotPanel.
@@ -54,6 +55,12 @@ func WithPickers() BotOption {
 // (default ZeroHashPeer), e.g. from the host's access-hash cache.
 func WithPeerResolver(resolve func(tg.PeerClass) (tg.InputPeerClass, error)) BotOption {
 	return func(p *BotPanel) { p.resolvePeer = resolve }
+}
+
+// WithContext names where a command was typed (the chat and its forum topic),
+// so the host can open the panel on a page about it.
+func WithContext(contextFor ContextFunc) BotOption {
+	return func(p *BotPanel) { p.contextFor = contextFor }
 }
 
 // NewBotPanel shows the panel served through client with the bot's api.
@@ -91,7 +98,11 @@ func (p *BotPanel) Open(ctx context.Context, peer tg.InputPeerClass, user int64,
 // "help"); empty args open the panel. msgID is the command's message, which
 // text replies answer.
 func (p *BotPanel) Command(ctx context.Context, peer tg.InputPeerClass, user int64, msgID int, args string) error {
-	response, err := p.client.Command(ctx, actorFor(user), p.view(peer), strings.TrimSpace(args))
+	view := p.view(peer)
+	if p.contextFor != nil {
+		view.Context = p.contextFor(peer, msgID)
+	}
+	response, err := p.client.Command(ctx, actorFor(user), view, strings.TrimSpace(args))
 	if err != nil {
 		_, sendErr := p.send(ctx, peer, plain(errorText(err)), nil, msgID)
 		return errors.Join(err, sendErr)

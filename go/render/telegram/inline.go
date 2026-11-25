@@ -58,6 +58,8 @@ type InlinePanel struct {
 	timeout   time.Duration
 	now       func() time.Time
 
+	contextFor ContextFunc
+
 	mu       sync.Mutex
 	screens  map[string]pendingScreen
 	lastPeer tg.InputPeerClass
@@ -100,6 +102,12 @@ func WithInlinePrefix(prefix string) InlineOption {
 // before the panel falls back to text.
 func WithInlineTimeout(timeout time.Duration) InlineOption {
 	return func(p *InlinePanel) { p.timeout = timeout }
+}
+
+// WithInlineContext names where a command was typed (the chat and its forum
+// topic), so the host can open the panel on a page about it.
+func WithInlineContext(contextFor ContextFunc) InlineOption {
+	return func(p *InlinePanel) { p.contextFor = contextFor }
 }
 
 // NewInlinePanel shows the panel served through client from the account
@@ -150,7 +158,11 @@ func (p *InlinePanel) Open(ctx context.Context, peer tg.InputPeerClass, page set
 // peer; empty args post the panel. msgID is the command's message, which
 // text replies answer.
 func (p *InlinePanel) Command(ctx context.Context, peer tg.InputPeerClass, msgID int, args string) error {
-	response, err := p.client.Command(ctx, p.actor(), p.view(), strings.TrimSpace(args))
+	view := p.view()
+	if p.contextFor != nil {
+		view.Context = p.contextFor(peer, msgID)
+	}
+	response, err := p.client.Command(ctx, p.actor(), view, strings.TrimSpace(args))
 	if err != nil {
 		return errors.Join(err, p.sendText(ctx, peer, plain(errorText(err)), msgID))
 	}

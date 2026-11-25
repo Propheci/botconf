@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -311,5 +312,24 @@ func TestCommandWithoutArgumentsPostsThePanel(t *testing.T) {
 	sends := all[*tg.MessagesSendMessageRequest](api)
 	if len(sends) != 1 || sends[0].Message != "Settings" || len(callbackData(sends[0].ReplyMarkup)) != 1 {
 		t.Fatalf("sent %#v, want the panel posted", sends)
+	}
+}
+
+// A host's ContextFunc names where the command was typed, so the core can
+// open the panel on a page about that chat and topic.
+func TestCommandCarriesTheContext(t *testing.T) {
+	server := &settingstest.Server{ActFunc: func(*settingspb.ActRequest) (*settingspb.ActResponse, error) {
+		return &settingspb.ActResponse{Screen: screen("Home", "Back", "o:")}, nil
+	}}
+	api := &recorder{}
+	panel := NewBotPanel(settingstest.Start(t, server), tg.NewClient(api), WithContext(func(peer tg.InputPeerClass, topic int) *settings.Context {
+		return &settings.Context{Chat: "chat-7", Thread: strconv.Itoa(topic)}
+	}))
+	if err := panel.Command(contextFor(t), &tg.InputPeerChannel{ChannelID: 7}, owner, 100, ""); err != nil {
+		t.Fatal(err)
+	}
+	got := server.Acts()[0].GetContext()
+	if got.GetChat() != "chat-7" || got.GetThread() != "100" {
+		t.Fatalf("context = %v, want chat-7 topic 100", got)
 	}
 }

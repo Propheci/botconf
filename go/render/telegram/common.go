@@ -140,3 +140,8 @@ func botAPIChatID(peer tg.PeerClass) (json.RawMessage, string, bool) {
 		return nil, "", false
 	}
 }
+
+// ContextFunc names where a panel command was typed, for the host's data
+// pages (settings.View.Context): the chat of peer, and the forum topic whose
+// root is topic (0: none). Nil leaves the context unknown.
+type ContextFunc func(peer tg.InputPeerClass, topic int) *settings.Context
